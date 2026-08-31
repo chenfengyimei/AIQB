@@ -10,6 +10,7 @@ server/data/
 .baidu-push-state.json
 
 # 构建产物与临时文件
+release/
 *.tar.gz
 h.txt
 h2.txt

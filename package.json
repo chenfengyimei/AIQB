@@ -1,6 +1,6 @@
 {
   "name": "aiqb",
-  "version": "2.25.0",
+  "version": "2.27.0",
   "private": true,
   "description": "可自托管的 AI 情报采集、去重、归档、展示与运营管理系统",
   "license": "CPAL-1.0",
@@ -17,8 +17,11 @@
   "scripts": {
     "start": "node server/server.js",
     "setup": "node scripts/setup.js",
+    "admin:bootstrap": "node scripts/bootstrap_admin.js",
     "test:install": "node scripts/community_install_test.js",
-    "test": "node scripts/setup_test.js && node scripts/state_db_test.js && node scripts/backup_data_test.js && node scripts/update_manager_test.js && node scripts/multiprocess_state_test.js && node scripts/collector_recovery_test.js && node scripts/collect_test.js && node scripts/sync_test.js && node scripts/endpoint_registry_test.js && node scripts/community_install_test.js && node scripts/intelligence_store_test.js && node scripts/stats_test.js && node scripts/smoke_test.js",
+    "test": "node scripts/setup_test.js && node scripts/state_db_test.js && node scripts/backup_data_test.js && node scripts/release_signature_test.js && node scripts/update_manager_test.js && node scripts/multiprocess_state_test.js && node scripts/http_security_test.js && node scripts/safe_fetch_test.js && node scripts/baidu_push_security_test.js && node scripts/collector_recovery_test.js && node scripts/collect_test.js && node scripts/sync_test.js && node scripts/endpoint_registry_test.js && node scripts/community_install_test.js && node scripts/intelligence_store_test.js && node scripts/stats_test.js && node scripts/smoke_test.js",
+    "sign:release": "node scripts/sign_release.js",
+    "verify:release": "node scripts/verify_release.js",
     "perf": "node scripts/perf_test.js"
   },
   "engines": {

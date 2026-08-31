@@ -2,6 +2,7 @@
 server/data/
 screenshots/
 docs/
+release/
 scripts/remote_*.sh
 *.tar.gz
 *.log

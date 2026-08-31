@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { publicKeyFromEnv, verifyReleaseManifest } = require('./release-signature');
 
 const AUTHOR = 'chenfeng';
 const DEFAULT_GITHUB_REPO = 'chenfengyimei/AIQB';
@@ -21,6 +22,16 @@ function cleanBranch(value) {
   return /^[A-Za-z0-9._/-]{1,100}$/.test(branch) && !branch.includes('..') ? branch : 'master';
 }
 
+function normalizeRevision(value) {
+  const revision = String(value || '').trim().toLowerCase();
+  return /^[0-9a-f]{40,64}$/.test(revision) ? revision : '';
+}
+
+function appendQuery(url, name, value) {
+  if (!value) return url;
+  return url + (url.includes('?') ? '&' : '?') + encodeURIComponent(name) + '=' + encodeURIComponent(value);
+}
+
 function sourcesFromEnv(env) {
   const vars = env || process.env;
   const branch = cleanBranch(vars.AIQB_UPDATE_BRANCH);
@@ -33,19 +44,41 @@ function sourcesFromEnv(env) {
   return {
     github: {
       id: 'github', name: 'GitHub', repo: githubRepo, branch,
+      apiBase: githubApi,
       repositoryUrl: 'https://github.com/' + githubRepo,
+      commitUrl: githubApi + '/commits/' + encodeURIComponent(branch),
       manifestUrl: githubApi + '/contents/package.json?ref=' + encodeURIComponent(branch),
       archiveUrl: githubApi + '/tarball/' + encodeURIComponent(branch),
       token: githubToken,
     },
     gitee: {
       id: 'gitee', name: 'Gitee', repo: giteeRepo, branch,
+      apiBase: giteeApi,
       repositoryUrl: 'https://gitee.com/' + giteeRepo,
-      manifestUrl: giteeApi + '/contents/package.json?ref=' + encodeURIComponent(branch) + (giteeToken ? '&access_token=' + encodeURIComponent(giteeToken) : ''),
-      archiveUrl: giteeApi + '/tarball?ref=' + encodeURIComponent(branch) + (giteeToken ? '&access_token=' + encodeURIComponent(giteeToken) : ''),
+      commitUrl: appendQuery(giteeApi + '/commits/' + encodeURIComponent(branch), 'access_token', giteeToken),
+      manifestUrl: appendQuery(giteeApi + '/contents/package.json?ref=' + encodeURIComponent(branch), 'access_token', giteeToken),
+      archiveUrl: appendQuery(giteeApi + '/tarball?ref=' + encodeURIComponent(branch), 'access_token', giteeToken),
       token: giteeToken,
     },
   };
+}
+
+function sourceForRevision(source, value) {
+  const revision = normalizeRevision(value);
+  if (!source || !revision) throw Object.assign(new Error('更新提交标识无效'), { statusCode: 422 });
+  const pinned = Object.assign({}, source, { revision });
+  if (source.id === 'github') {
+    pinned.manifestUrl = source.apiBase + '/contents/package.json?ref=' + encodeURIComponent(revision);
+    pinned.signatureUrl = source.apiBase + '/contents/release-signature.json?ref=' + encodeURIComponent(revision);
+    pinned.archiveUrl = source.apiBase + '/tarball/' + encodeURIComponent(revision);
+  } else if (source.id === 'gitee') {
+    pinned.manifestUrl = appendQuery(source.apiBase + '/contents/package.json?ref=' + encodeURIComponent(revision), 'access_token', source.token);
+    pinned.signatureUrl = appendQuery(source.apiBase + '/contents/release-signature.json?ref=' + encodeURIComponent(revision), 'access_token', source.token);
+    pinned.archiveUrl = appendQuery(source.apiBase + '/tarball?ref=' + encodeURIComponent(revision), 'access_token', source.token);
+  } else {
+    throw Object.assign(new Error('未知更新源'), { statusCode: 400 });
+  }
+  return pinned;
 }
 
 function publicSource(source) {
@@ -88,22 +121,51 @@ function readJson(file, fallback) {
 async function readLimitedResponse(response, limit) {
   const contentLength = Number(response.headers.get('content-length')) || 0;
   if (contentLength > limit) throw Object.assign(new Error('远端版本文件过大'), { statusCode: 502 });
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.length > limit) throw Object.assign(new Error('远端版本文件过大'), { statusCode: 502 });
-  return bytes.toString('utf8');
+  if (!response.body) throw Object.assign(new Error('远端响应正文为空'), { statusCode: 502 });
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      const chunk = Buffer.from(next.value);
+      total += chunk.length;
+      if (total > limit) {
+        try { await reader.cancel(); } catch (_) {}
+        throw Object.assign(new Error('远端版本文件过大'), { statusCode: 502 });
+      }
+      chunks.push(chunk);
+    }
+  } finally { try { reader.releaseLock(); } catch (_) {} }
+  return Buffer.concat(chunks, total).toString('utf8');
+}
+
+function decodeManifestContent(text) {
+  let value;
+  try { value = JSON.parse(text); } catch (_) { return String(text || ''); }
+  if (value && value.encoding === 'base64' && value.content) {
+    try { return Buffer.from(String(value.content).replace(/\s/g, ''), 'base64').toString('utf8'); }
+    catch (_) { throw Object.assign(new Error('远端文件解码失败'), { statusCode: 502 }); }
+  }
+  return String(text || '');
 }
 
 function decodeManifest(text) {
   let value;
-  try { value = JSON.parse(text); } catch (_) { throw Object.assign(new Error('远端未返回有效的 package.json'), { statusCode: 502 }); }
-  if (value && value.encoding === 'base64' && value.content) {
-    try { value = JSON.parse(Buffer.from(String(value.content).replace(/\s/g, ''), 'base64').toString('utf8')); }
-    catch (_) { throw Object.assign(new Error('远端 package.json 解码失败'), { statusCode: 502 }); }
-  }
+  try { value = JSON.parse(decodeManifestContent(text)); } catch (_) { throw Object.assign(new Error('远端未返回有效的 package.json'), { statusCode: 502 }); }
   if (!value || value.name !== 'aiqb' || !parseVersion(value.version)) {
     throw Object.assign(new Error('远端安装包不是有效的 AIQB 版本'), { statusCode: 502 });
   }
   return value;
+}
+
+function decodeCommit(text) {
+  let value;
+  try { value = JSON.parse(text); } catch (_) { throw Object.assign(new Error('远端未返回有效的提交信息'), { statusCode: 502 }); }
+  const revision = normalizeRevision(value && (value.sha || value.id));
+  if (!revision) throw Object.assign(new Error('远端提交标识无效'), { statusCode: 502 });
+  return revision;
 }
 
 function requestHeaders(source) {
@@ -114,6 +176,15 @@ function requestHeaders(source) {
     if (source.token) headers.authorization = 'Bearer ' + source.token;
   }
   return headers;
+}
+
+function validateUpdateConfirmation(checked, expectedVersion, expectedRevision, expectedKeyId) {
+  if (!checked || !checked.updateAvailable) throw Object.assign(new Error('当前已经是最新版'), { statusCode: 409 });
+  if (String(expectedVersion || '') !== checked.latestVersion) throw Object.assign(new Error('确认版本与最新版本不一致，请重新检查'), { statusCode: 409 });
+  const revision = normalizeRevision(expectedRevision);
+  if (!revision || revision !== checked.revision) throw Object.assign(new Error('远端提交已变化或确认信息缺失，请重新检查更新'), { statusCode: 409 });
+  if (!checked.signatureKeyId || String(expectedKeyId || '') !== checked.signatureKeyId) throw Object.assign(new Error('发布签名确认信息无效，请重新检查更新'), { statusCode: 409 });
+  return revision;
 }
 
 class UpdateManager {
@@ -127,6 +198,7 @@ class UpdateManager {
     this.lockFile = path.join(this.updateDir, 'running.lock');
     this.script = path.join(this.appDir, 'scripts', 'online_update.js');
     this.sources = sourcesFromEnv(opts.env);
+    this.publicKey = publicKeyFromEnv(opts.env);
     fs.mkdirSync(this.updateDir, { recursive: true, mode: 0o750 });
   }
 
@@ -160,7 +232,7 @@ class UpdateManager {
       sources: Object.values(this.sources).map(publicSource),
       status,
       supported: process.platform === 'linux' && fs.existsSync(this.script),
-      safeguards: ['仅允许预设 GitHub/Gitee 仓库', '远端版本与安装包双重校验', '更新前备份完整运行数据与代码', '永不覆盖 server/data', '失败自动恢复旧代码'],
+      safeguards: ['仅允许预设 GitHub/Gitee 仓库', '版本检查与安装包绑定同一不可变提交', '拒绝符号链接和异常安装包结构', '更新前备份完整运行数据与代码', '永不覆盖 server/data', '重载后健康检查，失败自动恢复旧代码'],
     };
   }
 
@@ -172,17 +244,41 @@ class UpdateManager {
 
   async check(id) {
     const source = this.source(id);
-    let response;
+    let commitResponse;
     try {
-      response = await fetch(source.manifestUrl, { headers: requestHeaders(source), redirect: 'follow', signal: AbortSignal.timeout(12000) });
+      commitResponse = await fetch(source.commitUrl, { headers: requestHeaders(source), redirect: 'error', signal: AbortSignal.timeout(12000) });
     } catch (error) {
       throw Object.assign(new Error('无法连接 ' + source.name + '：' + (error.name === 'TimeoutError' ? '请求超时' : error.message)), { statusCode: 502 });
     }
-    if (!response.ok) {
-      const privateHint = response.status === 401 || response.status === 403 || response.status === 404;
-      throw Object.assign(new Error(source.name + ' 版本检查失败（HTTP ' + response.status + '）' + (privateHint ? '，仓库若为私有请配置只读访问令牌' : '')), { statusCode: 502 });
+    if (!commitResponse.ok) {
+      const privateHint = commitResponse.status === 401 || commitResponse.status === 403 || commitResponse.status === 404;
+      throw Object.assign(new Error(source.name + ' 提交检查失败（HTTP ' + commitResponse.status + '）' + (privateHint ? '，仓库若为私有请配置只读访问令牌' : '')), { statusCode: 502 });
     }
-    const manifest = decodeManifest(await readLimitedResponse(response, 256 * 1024));
+    const revision = decodeCommit(await readLimitedResponse(commitResponse, 256 * 1024));
+    const pinned = sourceForRevision(source, revision);
+    let manifestResponse;
+    try {
+      manifestResponse = await fetch(pinned.manifestUrl, { headers: requestHeaders(pinned), redirect: 'error', signal: AbortSignal.timeout(12000) });
+    } catch (error) {
+      throw Object.assign(new Error('无法读取 ' + source.name + ' 提交清单：' + (error.name === 'TimeoutError' ? '请求超时' : error.message)), { statusCode: 502 });
+    }
+    if (!manifestResponse.ok) throw Object.assign(new Error(source.name + ' 提交清单读取失败（HTTP ' + manifestResponse.status + '）'), { statusCode: 502 });
+    const manifest = decodeManifest(await readLimitedResponse(manifestResponse, 256 * 1024));
+    let signatureResponse;
+    try {
+      signatureResponse = await fetch(pinned.signatureUrl, { headers: requestHeaders(pinned), redirect: 'error', signal: AbortSignal.timeout(12000) });
+    } catch (error) {
+      throw Object.assign(new Error('无法读取 ' + source.name + ' 发布签名：' + (error.name === 'TimeoutError' ? '请求超时' : error.message)), { statusCode: 502 });
+    }
+    if (!signatureResponse.ok) throw Object.assign(new Error(source.name + ' 发布签名读取失败（HTTP ' + signatureResponse.status + '）'), { statusCode: 502 });
+    let signatureManifest;
+    try {
+      const rawSignature = decodeManifestContent(await readLimitedResponse(signatureResponse, 2 * 1024 * 1024));
+      signatureManifest = verifyReleaseManifest(JSON.parse(rawSignature), this.publicKey);
+    } catch (error) {
+      throw Object.assign(new Error(source.name + ' 发布签名验证失败：' + error.message), { statusCode: 502 });
+    }
+    if (signatureManifest.version !== manifest.version) throw Object.assign(new Error(source.name + ' 版本与发布签名不一致'), { statusCode: 502 });
     const result = {
       source: source.id,
       sourceName: source.name,
@@ -192,6 +288,10 @@ class UpdateManager {
       updateAvailable: compareVersions(manifest.version, this.version) > 0,
       repositoryUrl: source.repositoryUrl,
       branch: source.branch,
+      revision,
+      revisionShort: revision.slice(0, 12),
+      signed: true,
+      signatureKeyId: signatureManifest.keyId,
     };
     const state = this.status();
     state.lastCheck = result;
@@ -200,12 +300,11 @@ class UpdateManager {
     return result;
   }
 
-  async start(id, expectedVersion) {
+  async start(id, expectedVersion, expectedRevision, expectedKeyId) {
     if (process.platform !== 'linux') throw Object.assign(new Error('在线安装仅支持 Linux 生产服务器；当前环境可检查版本但不能覆盖本机代码'), { statusCode: 409 });
     if (!fs.existsSync(this.script)) throw Object.assign(new Error('在线更新脚本缺失，请先用部署包升级一次'), { statusCode: 409 });
     const checked = await this.check(id);
-    if (!checked.updateAvailable) throw Object.assign(new Error('当前已经是最新版'), { statusCode: 409 });
-    if (String(expectedVersion || '') !== checked.latestVersion) throw Object.assign(new Error('确认版本与最新版本不一致，请重新检查'), { statusCode: 409 });
+    validateUpdateConfirmation(checked, expectedVersion, expectedRevision, expectedKeyId);
     fs.mkdirSync(this.updateDir, { recursive: true, mode: 0o750 });
     let lock;
     try { lock = fs.openSync(this.lockFile, 'wx', 0o600); }
@@ -221,12 +320,12 @@ class UpdateManager {
     fs.writeFileSync(lock, JSON.stringify({ owner: process.pid, source: checked.source, version: checked.latestVersion, createdAt: new Date().toISOString() }) + '\n');
     fs.closeSync(lock);
     const state = {
-      phase: 'queued', source: checked.source, fromVersion: this.version, toVersion: checked.latestVersion,
+      phase: 'queued', source: checked.source, fromVersion: this.version, toVersion: checked.latestVersion, revision: checked.revision, signatureKeyId: checked.signatureKeyId,
       message: '更新任务已进入队列', startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
     atomicJson(this.stateFile, state);
     try {
-      const child = spawn(process.execPath, [this.script, '--source', checked.source, '--version', checked.latestVersion, '--app-dir', this.appDir, '--data-dir', this.dataDir], {
+      const child = spawn(process.execPath, [this.script, '--source', checked.source, '--version', checked.latestVersion, '--revision', checked.revision, '--key-id', checked.signatureKeyId, '--app-dir', this.appDir, '--data-dir', this.dataDir], {
         cwd: this.appDir,
         env: process.env,
         detached: true,
@@ -242,4 +341,4 @@ class UpdateManager {
   }
 }
 
-module.exports = { UpdateManager, AUTHOR, sourcesFromEnv, publicSource, parseVersion, compareVersions, decodeManifest, atomicJson, requestHeaders };
+module.exports = { UpdateManager, AUTHOR, sourcesFromEnv, sourceForRevision, publicSource, parseVersion, compareVersions, normalizeRevision, decodeManifestContent, decodeManifest, decodeCommit, validateUpdateConfirmation, atomicJson, requestHeaders };

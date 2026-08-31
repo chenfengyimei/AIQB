@@ -1515,9 +1515,10 @@ function renderUpdateView(el, data){
   var busy = ['queued','downloading','backing_up','installing','restarting'].indexOf(status.phase) !== -1;
   var sourceCards = (data.sources || []).map(function(source){
     var checked = last && last.source === source.id ? last : null;
-    var versionLine = checked ? ('远端 v' + esc(checked.latestVersion) + (checked.updateAvailable ? ' · <b class="update-new">发现新版本</b>' : ' · 已是最新版')) : '尚未检查远端版本';
+    var revision = checked && (checked.revisionShort || String(checked.revision || '').slice(0, 12));
+    var versionLine = checked ? ('远端 v' + esc(checked.latestVersion) + (revision ? ' · 提交 <span class="mono">' + esc(revision) + '</span>' : '') + (checked.signed ? ' · <b class="update-new">签名有效</b>' : '') + (checked.updateAvailable ? ' · <b class="update-new">发现新版本</b>' : ' · 已是最新版')) : '尚未检查远端版本';
     var action = '<button class="btn sm update-check" data-source="' + esc(source.id) + '"' + (busy ? ' disabled' : '') + '>检查更新</button>';
-    if (checked && checked.updateAvailable && data.supported && !busy) action += '<button class="btn btn-solid sm update-apply" data-source="' + esc(source.id) + '" data-version="' + esc(checked.latestVersion) + '">更新到 v' + esc(checked.latestVersion) + '</button>';
+    if (checked && checked.updateAvailable && checked.revision && checked.signatureKeyId && data.supported && !busy) action += '<button class="btn btn-solid sm update-apply" data-source="' + esc(source.id) + '" data-version="' + esc(checked.latestVersion) + '" data-revision="' + esc(checked.revision) + '" data-key-id="' + esc(checked.signatureKeyId) + '">更新到 v' + esc(checked.latestVersion) + '</button>';
     return '<div class="repo-card"><div class="repo-head"><div class="repo-logo ' + esc(source.id) + '">' + (source.id === 'github' ? 'GH' : '码') + '</div><div><b>' + esc(source.name) + '</b><span>' + esc(source.repo) + ' · ' + esc(source.branch) + '</span></div></div>' +
       '<div class="repo-version">' + versionLine + '</div><div class="repo-actions">' + action + '<a class="btn sm" href="' + esc(source.repositoryUrl) + '" target="_blank" rel="noopener noreferrer">打开仓库 ↗</a></div>' +
       (source.authenticated ? '<small class="repo-auth">已配置只读访问令牌</small>' : '<small>公开仓库可直接检查；私有仓库需在服务器环境变量中配置只读令牌</small>') + '</div>';
@@ -1547,10 +1548,10 @@ function renderUpdateView(el, data){
   });
   el.querySelectorAll('.update-apply').forEach(function(button){
     button.addEventListener('click', function(){
-      var source = this.getAttribute('data-source'), version = this.getAttribute('data-version');
-      if (!window.confirm('确认将 AIQB 更新到 v' + version + '？\n\n系统会先备份完整数据与旧代码，更新期间服务可能短暂重载。')) return;
+      var source = this.getAttribute('data-source'), version = this.getAttribute('data-version'), revision = this.getAttribute('data-revision'), keyId = this.getAttribute('data-key-id');
+      if (!window.confirm('确认将 AIQB 更新到 v' + version + '？\n\n提交：' + String(revision || '').slice(0, 12) + '\n签名密钥：' + String(keyId || '') + '\n系统会验证签名与逐文件哈希、备份完整数据与旧代码，并在重载后执行健康检查。')) return;
       var btn = this; btn.disabled = true; btn.textContent = '启动中…';
-      apiPost('/api/admin/update/apply', { source: source, expectedVersion: version }).then(function(){
+      apiPost('/api/admin/update/apply', { source: source, expectedVersion: version, expectedRevision: revision, expectedKeyId: keyId }).then(function(){
         toast('更新任务已启动，请勿重复操作', 'info');
         setTimeout(function(){ if (App.view === 'update') viewOnlineUpdate(el); }, 1800);
       }).catch(function(err){ toast(err.message || '启动更新失败', 'err'); btn.disabled = false; btn.textContent = '更新到 v' + version; });

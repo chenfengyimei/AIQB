@@ -46,7 +46,8 @@ function check(name, condition) { console.log((condition ? 'PASS ' : 'FAIL ') + 
   check('公开 API 与资源分别统计', today.scopes.api.requests === 1 && today.scopes.asset.requests === 1);
   check('链接点击独立统计且文章分享不混入链接点击', today.clicks === 2 && today.itemClicks === 1 && today.friendClicks === 1 && today.articleShares === 1 && today.scopes.click.requests === 3 && today.api === 2);
   check('旧版历史流水自动补算链接点击', result.totals.clicks === 3 && result.totals.itemClicks === 2 && result.totals.friendClicks === 1);
-  check('文章访问和分享支持今日、本月与历史聚合', today.articlePv === 1 && result.currentMonth.articlePv >= 2 && result.totals.articlePv === 2 && result.totals.articleShares === 2);
+  const expectedMonthArticlePv = pastKey.slice(0, 7) === key.slice(0, 7) ? 2 : 1;
+  check('文章访问和分享支持今日、本月与历史聚合', today.articlePv === 1 && result.currentMonth.articlePv === expectedMonthArticlePv && result.totals.articlePv === 2 && result.totals.articleShares === 2);
   check('总 UV/IP 跨区域去重', today.uv === 2 && today.ips === 2);
   check('永久历史和路径明细可查询', result.retention === 'forever' && result.topPages.length === 3 && result.topRoutes.length >= 9 && result.topLinks.length === 3);
   stats.track('203.0.113.42', 'Geo Browser', '/geo-a', 200, 'frontend', { country:'CN', regionCode:'CN-GD', region:'Guangdong', city:'Shenzhen' });

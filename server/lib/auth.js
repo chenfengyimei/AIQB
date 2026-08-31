@@ -2,7 +2,7 @@
 // 存储（data/auth/ 下）：
 //   users.json             单管理员账号（scrypt 哈希，绝不落明文密码）
 //   sessions.json          活跃会话（只存 token 的 sha256，泄漏文件也无法伪造 cookie）
-//   initial-password.txt   首次启动生成的初始密码（修改密码后自动删除）
+// 初始管理员必须通过本机安装流程一次性提供；只保存 scrypt 哈希，不生成明文密码文件。
 // 会话策略：httpOnly + SameSite=Lax cookie；HTTPS（X-Forwarded-Proto）下自动加 Secure；
 //           滑动续期（剩余不足一半时刷新），最长生命周期 30 天；服务重启会话不失效。
 // 限流：同一 IP 15 分钟内最多 10 次登录尝试。
@@ -19,6 +19,7 @@ const COOKIE_NAME = 'aqb_admin';
 const SESSION_MAX_MS = 30 * 24 * 3600 * 1000; // 会话最长生命周期
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX = 10;
+const LOGIN_ACCOUNT_MAX = 50;
 
 function sha256hex(s) { return crypto.createHash('sha256').update(s, 'utf8').digest('hex'); }
 
@@ -34,15 +35,6 @@ function scryptAsync(password, salt) {
       if (err) reject(err); else resolve(key.toString('hex'));
     });
   });
-}
-
-function genPassword() {
-  // 生成 12 位易抄写的随机密码（去除易混淆字符）
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-  const bytes = crypto.randomBytes(12);
-  let out = '';
-  for (let i = 0; i < 12; i++) out += alphabet[bytes[i] % alphabet.length];
-  return out;
 }
 
 class AuthError extends Error {
@@ -67,8 +59,11 @@ class Auth {
   }
 
   init() {
-    fs.mkdirSync(this.dir, { recursive: true });
+    fs.mkdirSync(this.dir, { recursive: true, mode: 0o700 });
+    try { fs.chmodSync(this.dir, 0o700); } catch (_) {}
     this._loadUser();
+    // 旧版本可能留下初始口令文件。账号哈希加载成功后立即清除，避免升级后继续遗留明文。
+    try { fs.unlinkSync(this.initialPasswordFile); } catch (_) {}
     this._loadSessions();
     this._sweepTimer = setInterval(() => this.sweep(), 10 * 60 * 1000);
     this._sweepTimer.unref();
@@ -88,8 +83,13 @@ class Auth {
         return;
       }
     } catch (e) { /* 不存在或损坏 */ }
-    // 首次启动：创建默认管理员 admin + 随机初始密码
-    const password = genPassword();
+    // 首次启动必须由本机安装器一次性注入口令。读取后立即从进程环境移除；
+    // 服务不会生成、打印或持久化可直接登录的明文凭据。
+    const password = String(process.env.AIQB_INITIAL_ADMIN_PASSWORD || '');
+    delete process.env.AIQB_INITIAL_ADMIN_PASSWORD;
+    if (password.length < 12 || password.length > 128) {
+      throw new Error('尚未初始化管理员账号；请先运行 npm run admin:bootstrap（密码需为 12–128 位）');
+    }
     const salt = crypto.randomBytes(16).toString('hex');
     const now = new Date().toISOString();
     this.user = {
@@ -102,15 +102,14 @@ class Auth {
       lastLoginAt: null,
     };
     this._persistUser();
-    const notice = 'AI圈报管理后台初始密码\n用户名: admin\n密码: ' + password +
-      '\n生成时间: ' + now + '\n请登录后台后立即修改密码（修改后本文件将自动删除）。\n';
-    try { fs.writeFileSync(this.initialPasswordFile, notice, 'utf8'); } catch (e) {}
-    console.log('====================================================================');
-    console.log('  管理后台已初始化（首次启动）');
-    console.log('  登录地址: /chenfengadmin    用户名: admin    初始密码: ' + password);
-    console.log('  初始密码同时保存在: ' + this.initialPasswordFile);
-    console.log('  请尽快登录后台修改密码！');
-    console.log('====================================================================');
+    console.log('管理后台账号已安全初始化；登录地址 /chenfengadmin，用户名 admin。');
+  }
+
+  _refreshUserFromShared() {
+    if (!this.stateDb) return this.user;
+    const stored = this.stateDb.getJSON('auth', 'user');
+    if (stored && stored.username && stored.passHash && stored.salt) this.user = stored;
+    return this.user;
   }
 
   _persistUser() {
@@ -147,10 +146,12 @@ class Auth {
   }
 
   _persistSessions() {
-    const arr = [];
+    let arr = [];
     for (const s of this.sessions.values()) arr.push(s);
     if (this.stateDb) {
-      for (const session of arr) this.stateDb.upsertSession(session);
+      // SQLite 是多进程会话唯一权威；绝不能用本进程旧缓存反向写回并复活已撤销会话。
+      arr = this.stateDb.listSessions(Date.now());
+      this.sessions = new Map(arr.map((session) => [session.tokenHash, session]));
       this.stateDb.setJSON('auth', 'sessions', { version: 1, sessions: arr });
     }
     atomicWrite(path.join(this.dir, 'sessions.json'), JSON.stringify({ version: 1, sessions: arr }, null, 1) + '\n');
@@ -176,10 +177,13 @@ class Auth {
 
   // ---------- 限流 ----------
 
-  _rateCheck(ip) {
+  _rateCheck(ip, username) {
     const now = Date.now();
     if (this.stateDb) {
-      if (!this.stateDb.registerLoginAttempt(sha256hex(String(ip || 'unknown')), now, LOGIN_WINDOW_MS, LOGIN_MAX)) {
+      const ipKey = 'ip:' + sha256hex(String(ip || 'unknown'));
+      const accountKey = 'account:' + sha256hex(String(username || '').trim().toLowerCase() || 'unknown');
+      if (!this.stateDb.registerLoginAttempt(ipKey, now, LOGIN_WINDOW_MS, LOGIN_MAX) ||
+          !this.stateDb.registerLoginAttempt(accountKey, now, LOGIN_WINDOW_MS, LOGIN_ACCOUNT_MAX)) {
         throw new AuthError('rate_limited', '尝试过于频繁，请 15 分钟后再试', 429);
       }
       return;
@@ -202,8 +206,8 @@ class Auth {
 
   async login(username, password, ip) {
     if (!username || !password) throw new AuthError('invalid_input', '请输入用户名和密码', 400);
-    this._rateCheck(ip || 'unknown');
-    const u = this.user;
+    this._rateCheck(ip || 'unknown', username);
+    const u = this._refreshUserFromShared();
     const hash = await scryptAsync(String(password), u.salt);
     const userOk = safeEqualStr(String(username).toLowerCase(), u.username.toLowerCase());
     const passOk = safeEqualStr(hash, u.passHash);
@@ -237,12 +241,10 @@ class Auth {
   verify(token) {
     if (!token) return null;
     const tokenHash = sha256hex(token);
-    let s = this.sessions.get(tokenHash);
-    // 多 Web 实例下，会话可能由另一实例创建；本地未命中时从 WAL 合并一次。
-    if (!s && this.stateDb) {
-      s = this.stateDb.getSession(tokenHash, Date.now());
-      if (s) this.sessions.set(tokenHash, s);
-    }
+    // SQLite 是多进程权威。每次鉴权都读取共享行，确保注销和改密立即在兄弟进程生效。
+    let s = this.stateDb ? this.stateDb.getSession(tokenHash, Date.now()) : this.sessions.get(tokenHash);
+    if (s) this.sessions.set(tokenHash, s);
+    else this.sessions.delete(tokenHash);
     if (!s) return null;
     const now = Date.now();
     if (s.expiresAt <= now || now - s.createdAt > SESSION_MAX_MS) {
@@ -252,12 +254,13 @@ class Auth {
       return null;
     }
     s.lastSeenAt = now;
-    if (s.expiresAt - now < (s.expiresAt - 0) / 2 && now - s.createdAt < SESSION_MAX_MS) {
+    if (s.expiresAt - now < this._ttlMs() / 2 && now - s.createdAt < SESSION_MAX_MS) {
       // 续期但不超过最长生命周期
       s.expiresAt = Math.min(now + this._ttlMs(), s.createdAt + SESSION_MAX_MS);
       if (this.stateDb) this.stateDb.upsertSession(s);
       this._markSessionsDirty();
     }
+    this._refreshUserFromShared();
     return { tokenHash, session: s, user: this.publicInfo() };
   }
 
@@ -265,8 +268,8 @@ class Auth {
     if (!token) return;
     const tokenHash = sha256hex(token);
     const deleted = this.sessions.delete(tokenHash);
-    if (this.stateDb) this.stateDb.deleteSession(tokenHash);
-    if (deleted) this._persistSessions();
+    const sharedDeleted = this.stateDb ? this.stateDb.deleteSession(tokenHash) : false;
+    if (deleted || sharedDeleted) this._persistSessions();
   }
 
   // ---------- 账号管理 ----------
@@ -285,9 +288,9 @@ class Auth {
 
   async changePassword(currentPassword, newPassword, currentToken) {
     if (!currentPassword || !newPassword) throw new AuthError('invalid_input', '请填写当前密码和新密码', 400);
-    if (String(newPassword).length < 8) throw new AuthError('weak_password', '新密码至少 8 位', 400);
+    if (String(newPassword).length < 12) throw new AuthError('weak_password', '新密码至少 12 位', 400);
     if (String(newPassword).length > 128) throw new AuthError('weak_password', '新密码过长', 400);
-    const u = this.user;
+    const u = this._refreshUserFromShared();
     const hash = await scryptAsync(String(currentPassword), u.salt);
     if (!safeEqualStr(hash, u.passHash)) throw new AuthError('bad_credentials', '当前密码不正确', 401);
 
@@ -313,7 +316,7 @@ class Auth {
     if (!/^[a-zA-Z0-9_-]{3,32}$/.test(name)) {
       throw new AuthError('invalid_username', '用户名需为 3–32 位字母/数字/下划线/短横线', 400);
     }
-    const u = this.user;
+    const u = this._refreshUserFromShared();
     const hash = await scryptAsync(String(currentPassword), u.salt);
     if (!safeEqualStr(hash, u.passHash)) throw new AuthError('bad_credentials', '当前密码不正确', 401);
     if (name.toLowerCase() === u.username.toLowerCase()) {

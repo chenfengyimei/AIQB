@@ -6,7 +6,7 @@
 //   4) 托管前端静态页（公开看板 + 管理后台），带内存缓存 / gzip / ETag 304；
 //   5) 全站访问埋点（PV/UV/日独立 IP/月度访问量），批量异步落盘。
 // 目录结构见 README；运行数据全部在 server/data/ 下，代码目录零状态、可随时整体替换升级。
-// 启动：node server.js [port]   （默认 3000，监听 0.0.0.0；环境变量 AIQB_PORT/AIQB_HOST/AIQB_DATA_DIR 可覆盖）
+// 启动：node server.js [port]   （默认 3000，仅监听 127.0.0.1；容器等场景可显式设置 AIQB_HOST）
 
 'use strict';
 
@@ -32,10 +32,10 @@ const { UpdateManager } = require('./lib/update-manager');
 const SEO = require('./lib/seo');
 const U = require('./lib/http-util');
 
-const VERSION = '2.25.0';
+const VERSION = String(require('../package.json').version);
 const ADMIN_PATH = '/chenfengadmin';
 const PORT = Number(process.argv[2] || process.env.AIQB_PORT || process.env.PORT || 3000);
-const HOST = process.env.AIQB_HOST || process.env.HOST || '0.0.0.0';
+const HOST = process.env.AIQB_HOST || process.env.HOST || '127.0.0.1';
 const ROLE = ['web', 'collector', 'primary'].includes(process.env.AIQB_ROLE) ? process.env.AIQB_ROLE : 'primary';
 const INSTANCE_ID = String(process.env.NODE_APP_INSTANCE || '0');
 const INSTANCE_OWNER = ROLE + ':' + INSTANCE_ID + ':' + process.pid + ':' + crypto.randomBytes(4).toString('hex');
@@ -100,7 +100,6 @@ const COLLECT_BUSY_RETRY_MS = boundedEnvMs('AIQB_COLLECT_BUSY_RETRY_MS', 30 * 10
 const COLLECT_FAILURE_RETRY_MS = boundedEnvMs('AIQB_COLLECT_FAILURE_RETRY_MS', 5 * 60 * 1000, 1000, 60 * 60 * 1000);
 const COLLECT_HEARTBEAT_MS = boundedEnvMs('AIQB_COLLECT_HEARTBEAT_MS', 30 * 1000, 1000, 5 * 60 * 1000);
 const startedAt = Date.now();
-const publicRefreshLimiter = U.createRateLimiter(); // 公开 /api/refresh 限流
 const clickLimiter = U.createRateLimiter();          // /api/track 点击统计限流
 const rumLimiter = U.createRateLimiter();            // 匿名 Web Vitals 上报限流
 const rumTelemetry = { samples: [] };
@@ -649,7 +648,7 @@ function readyHealthPayload() {
     intelligence: intelligence.stats().active,
     endpoints: endpoints.summary(),
     friendLinks: friendLinks.summary(),
-    lastError: lastCollectResult && !lastCollectResult.ok ? lastCollectResult.error : null,
+    lastError: lastCollectResult && !lastCollectResult.ok ? 'collection_failed' : null,
     refreshIntervalHours: config.collectIntervalHours,
     nextCollectAt: nextCollectAt ? new Date(nextCollectAt).toISOString() : null,
     snapshots: store.usage().entries,
@@ -1109,7 +1108,7 @@ async function handleAdmin(req, res, pathname, query) {
     try {
       const ip = U.clientIp(req);
       const { token, user } = await auth.login(body.username, body.password, ip);
-      const secure = String(req.headers['x-forwarded-proto'] || '').toLowerCase() === 'https';
+      const secure = process.env.NODE_ENV === 'production' || U.isSecureRequest(req);
       logCollect('后台登录成功: user=' + user.username + ' ip=' + ip);
       return U.sendJSON(req, res, 200, { ok: true, user }, { headers: { 'Set-Cookie': auth.sessionCookie(token, secure) } });
     } catch (err) {
@@ -1125,6 +1124,10 @@ async function handleAdmin(req, res, pathname, query) {
   const sess = getSession(req);
   if (!sess) return U.sendJSON(req, res, 401, { error: 'unauthorized', message: '未登录或会话已过期' });
 
+  if (isMutation && !U.sameOriginGuard(req)) {
+    return U.sendJSON(req, res, 403, { error: 'cross_origin_forbidden' });
+  }
+
   if (pathname === '/api/admin/logout' && isPost) {
     const token = U.parseCookies(req)[COOKIE_NAME];
     auth.logout(token);
@@ -1133,10 +1136,6 @@ async function handleAdmin(req, res, pathname, query) {
 
   if (pathname === '/api/admin/me' && method === 'GET') {
     return U.sendJSON(req, res, 200, { user: sess.user });
-  }
-
-  if (isMutation && !U.sameOriginGuard(req)) {
-    return U.sendJSON(req, res, 403, { error: 'cross_origin_forbidden' });
   }
 
   if (pathname === '/api/admin/password' && isPost) {
@@ -1186,7 +1185,7 @@ async function handleAdmin(req, res, pathname, query) {
     let body;
     try { body = await U.parseBody(req); } catch (e) { return U.sendJSON(req, res, e.status || 400, { error: 'bad_request', message: e.message }); }
     try {
-      const result = await updateManager.start(body.source, body.expectedVersion);
+      const result = await updateManager.start(body.source, body.expectedVersion, body.expectedRevision, body.expectedKeyId);
       logCollect('后台启动在线更新: source=' + String(body.source || '') + ' version=' + String(body.expectedVersion || '') + ' pid=' + result.pid);
       return U.sendJSON(req, res, 202, { ok: true, result }, { cacheControl: 'no-store' });
     } catch (e) {
@@ -1850,15 +1849,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/api/refresh' && req.method === 'GET') {
-      if (!publicRefreshLimiter.allow('refresh:' + ip, 1, 10 * 60 * 1000)) {
-        return U.sendJSON(req, res, 429, { error: 'rate_limited', message: '刷新过于频繁（每 10 分钟最多 1 次），请稍后再试' }, { cors: true });
-      }
-      const result = await runCollectWithSync('public-refresh');
-      if (result.busy) return U.sendJSON(req, res, 202, { ok: true, message: '采集正在进行中' }, { cors: true });
-      if (!result.ok) {
-        return U.sendJSON(req, res, 502, { error: 'collect_failed', message: result.error, data: publicData || null }, { cors: true });
-      }
-      return U.sendJSON(req, res, 200, publicData, { cors: true });
+      return U.sendJSON(req, res, 404, { error: 'not_found' }, { cors: true, etag: false });
     }
 
     // ---- 管理接口 ----
@@ -2018,7 +2009,7 @@ async function main() {
     console.log('  状态数据库: SQLite WAL · ' + stateDb.file);
     console.log('  采集间隔: ' + config.collectIntervalHours + ' 小时（后台可改）· 历史快照保留: ' +
       (config.retentionDays > 0 ? config.retentionDays + ' 天' : '永久'));
-    console.log('  端点: /api/data  /api/refresh  /health  /api/admin/*');
+    console.log('  端点: /api/data  /health  /api/admin/*');
     console.log('  精选全量同步: ' + (selectedSync.status().hasCursor
       ? '已引导（cursor ' + String(selectedSync.state.cursorAt || '').slice(0, 10) + '，每轮采集后增量）'
       : '待引导（首轮采集后自动拉取完整精选集）'));

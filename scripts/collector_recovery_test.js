@@ -48,6 +48,7 @@ async function main() {
       AIQB_HOST: '127.0.0.1',
       AIQB_ROLE: 'collector',
       AIQB_ENDPOINT_PRESET: 'community',
+      AIQB_INITIAL_ADMIN_PASSWORD: 'Collector-Test-Password-2026',
       AIQB_COLLECT_BUSY_RETRY_MS: '500',
       AIQB_COLLECT_HEARTBEAT_MS: '1000',
       AIQB_COLLECT_LOCK_TTL_MS: '1500',

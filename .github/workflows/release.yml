@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run verify:release
+      - name: Verify tag matches package version
+        run: node -e "const v=require('./package.json').version;if(process.env.GITHUB_REF_NAME!=='v'+v)throw new Error('tag/version mismatch')"
+      - name: Build source archive and checksum
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          git archive --format=zip --prefix="AIQB-v${VERSION}/" --output="AIQB-v${VERSION}.zip" HEAD
+          sha256sum "AIQB-v${VERSION}.zip" > "AIQB-v${VERSION}.zip.sha256"
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          gh release create "v${VERSION}" "AIQB-v${VERSION}.zip" "AIQB-v${VERSION}.zip.sha256" --verify-tag --generate-notes --title "AIQB v${VERSION}"

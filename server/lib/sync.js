@@ -15,10 +15,17 @@ const API = UPSTREAM_BASE + '/api/v1';
 const SNAPSHOT_LIMIT = 1000; // 官方单页上限
 const CHANGES_LIMIT = 100;   // 官方单页上限
 const MAX_PAGES = 200;       // 单轮分页安全上限（1000×200 足够覆盖全集并防失控）
+const MAX_TOTAL_ITEMS = 50000;
+const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 const PAGE_DELAY_MS = 300;   // 分页间隔，礼貌抓取
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function text(value, max) { return String(value == null ? '' : value).replace(/\u0000/g, '').trim().slice(0, max); }
+function payloadBytes(value) { return Number(value && value.__apiMeta && value.__apiMeta.bytes) || 0; }
+function assertRunBudget(items, bytes) {
+  if (items > MAX_TOTAL_ITEMS) throw new Error('同步条目超过单轮安全上限 ' + MAX_TOTAL_ITEMS + '，已中止');
+  if (bytes > MAX_TOTAL_BYTES) throw new Error('同步响应累计超过 64MB 安全上限，已中止');
+}
 
 class SelectedSync {
   constructor(dataDir, deps) {
@@ -82,13 +89,15 @@ class SelectedSync {
     const ingestMeta = { trigger: text(trigger, 30) + ':snapshot', sourceKind: 'sync', defaultSelected: true, at };
     let pageToken = null;
     let cursor = null;
-    let pages = 0, items = 0, added = 0, updated = 0;
+    let pages = 0, items = 0, bytes = 0, added = 0, updated = 0;
     while (pages < MAX_PAGES) {
       const snapshotUrl = new URL(this._endpointUrl('selectedSnapshot', API + '/selected/snapshot?fields=default&limit=' + SNAPSHOT_LIMIT));
       if (pageToken) snapshotUrl.searchParams.set('page', pageToken);
       const url = snapshotUrl.toString();
       const payload = await this._fetchPage(url);
       if (!payload || payload.schemaVersion !== 1 || !Array.isArray(payload.items)) throw new Error('精选快照响应结构无效');
+      bytes += payloadBytes(payload);
+      assertRunBudget(items + payload.items.length, bytes);
       const pageCursor = text(payload.cursor, 2000);
       if (!pageCursor) throw new Error('精选快照缺少同步 cursor');
       if (cursor === null) cursor = pageCursor;
@@ -118,7 +127,7 @@ class SelectedSync {
   async _applyChanges(trigger) {
     const started = Date.now();
     let cursor = this.state.cursor;
-    let pages = 0, upserts = 0, removes = 0, added = 0, updated = 0, archived = 0;
+    let pages = 0, upserts = 0, removes = 0, bytes = 0, added = 0, updated = 0, archived = 0;
     while (pages < MAX_PAGES) {
       const template = this._endpointUrl('selectedChanges', API + '/selected/changes?limit=' + CHANGES_LIMIT + '&cursor={cursor}');
       const url = template.includes('{cursor}')
@@ -132,6 +141,8 @@ class SelectedSync {
         throw error;
       }
       if (!payload || payload.schemaVersion !== 1 || !Array.isArray(payload.changes)) throw new Error('精选增量响应结构无效');
+      bytes += payloadBytes(payload);
+      assertRunBudget(upserts + removes + payload.changes.length, bytes);
       const upsertItems = [];
       const removeIds = [];
       for (const change of payload.changes) {
@@ -277,7 +288,7 @@ class AllPoolSync {
     this.state.lastRunAt = new Date().toISOString();
     this.state.lastTrigger = text(trigger, 50) || 'unknown';
     const started = Date.now();
-    let received = 0, added = 0, updated = 0, pages = 0;
+    let received = 0, bytes = 0, added = 0, updated = 0, pages = 0;
     try {
       const collected = [];
       let cursor = null;
@@ -288,6 +299,8 @@ class AllPoolSync {
         const payload = await this._fetchPage(url, endpoint);
         if (!payload || payload.schemaVersion !== 1 || !Array.isArray(payload.items)) throw new Error('全量池响应结构无效');
         if (!payload.page || typeof payload.page.hasMore !== 'boolean') throw new Error('全量池缺少分页信息');
+        bytes += payloadBytes(payload);
+        assertRunBudget(received + payload.items.length, bytes);
         collected.push(...payload.items);
         received += payload.items.length;
         pages++;
@@ -330,4 +343,4 @@ class AllPoolSync {
   }
 }
 
-module.exports = { SelectedSync, AllPoolSync, API, SNAPSHOT_LIMIT, CHANGES_LIMIT };
+module.exports = { SelectedSync, AllPoolSync, API, SNAPSHOT_LIMIT, CHANGES_LIMIT, MAX_PAGES, MAX_TOTAL_ITEMS, MAX_TOTAL_BYTES, assertRunBudget };

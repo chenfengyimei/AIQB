@@ -14,6 +14,8 @@ const common = {
   wait_ready: false,
   env: {
     NODE_ENV: 'production',
+    AIQB_HOST: process.env.AIQB_HOST || '127.0.0.1',
+    AIQB_TRUSTED_PROXIES: process.env.AIQB_TRUSTED_PROXIES || '127.0.0.1,::1',
     AIQB_DATA_DIR: dataDir,
     AIQB_ENDPOINT_PRESET: process.env.AIQB_ENDPOINT_PRESET || 'community',
     AIQB_UPSTREAM_BASE_URL: process.env.AIQB_UPSTREAM_BASE_URL || 'https://upstream.invalid',
@@ -38,6 +40,9 @@ module.exports = {
         AIQB_UPDATE_GITHUB_TOKEN: process.env.AIQB_UPDATE_GITHUB_TOKEN || '',
         AIQB_UPDATE_GITEE_REPO: process.env.AIQB_UPDATE_GITEE_REPO || 'chenfengloveyuri/aiqb',
         AIQB_UPDATE_GITEE_TOKEN: process.env.AIQB_UPDATE_GITEE_TOKEN || '',
+        AIQB_UPDATE_PUBLIC_KEY_FILE: process.env.AIQB_UPDATE_PUBLIC_KEY_FILE || '',
+        AIQB_UPDATE_PUBLIC_KEY: process.env.AIQB_UPDATE_PUBLIC_KEY || '',
+        AIQB_UPDATE_HEALTH_URL: process.env.AIQB_UPDATE_HEALTH_URL || ('http://127.0.0.1:' + webPort + '/health/live'),
       },
     },
     {

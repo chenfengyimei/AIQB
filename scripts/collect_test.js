@@ -24,49 +24,54 @@ function fallbackData(size) {
 }
 
 async function main() {
-  const originalFetch = global.fetch;
+  let mockFetch;
+  const transport = async (url) => {
+    const res = await mockFetch(url);
+    const body = await res.text();
+    return { ok: res.ok, status: res.status, headers: res.headers, body, bytes: Buffer.byteLength(body), wireBytes: Buffer.byteLength(body) };
+  };
   try {
     console.log('[1] 正常采集与批内去重');
-    global.fetch = async (url) => {
+    mockFetch = async (url) => {
       if (url.includes('hot-topics')) return response({ items: [item('h1', '热点一'), item('h1', '热点一')] });
       if (url.includes('/dailies?')) return response({ items: [{ date: '2026-08-29', leadTitle: '测试日报' }] });
       if (url.includes('dailies')) return response({ report: { sections: [] } });
       return response({ items: [item('a', '情报 A'), item('a', '情报 A'), item('b', '情报 B')] });
     };
-    const fresh = await collect({ retries: 0 });
+    const fresh = await collect({ retries: 0, transport });
     check('全部分区采集成功', fresh.ok && Object.values(fresh.freshness).every((value) => value === 'fresh'));
     check('上游完全重复条目在采集入口合并', fresh.counts.w7 === 2 && fresh.counts.hot === 1);
 
     console.log('[2] 单分区失败回退');
     const fallback = fallbackData(4);
-    global.fetch = async (url) => {
+    mockFetch = async (url) => {
       if (url.includes('window=7d')) throw new Error('simulated timeout');
       if (url.includes('hot-topics')) return response({ items: [item('h2', '热点二')] });
       if (url.includes('/dailies?')) return response({ items: [{ date: '2026-08-29', leadTitle: '测试日报' }] });
       if (url.includes('dailies')) return response({ report: { sections: [] } });
       return response({ items: [item('n1', '新情报')] });
     };
-    const partial = await collect({ retries: 0, fallback });
+    const partial = await collect({ retries: 0, fallback, transport });
     check('单分区失败不拖垮整批采集', partial.ok && partial.freshness.window7d === 'fallback' && partial.freshness.window24h === 'fresh');
     check('失败分区沿用最近有效内容并记录警告', partial.data.window7d.length === fallback.window7d.length && partial.warnings.some((warning) => warning.startsWith('items7d:')));
 
     console.log('[3] 异常数据量保护与全失败判定');
     const largeFallback = fallbackData(20);
-    global.fetch = async (url) => {
+    mockFetch = async (url) => {
       if (url.includes('window=7d')) return response({ items: [item('only', '异常少量')] });
       if (url.includes('hot-topics')) return response({ items: [item('h3', '热点三')] });
       if (url.includes('/dailies?')) return response({ items: [{ date: '2026-08-29', leadTitle: '测试日报' }] });
       if (url.includes('dailies')) return response({ report: { sections: [] } });
       return response({ items: [item('n2', '新情报二')] });
     };
-    const guarded = await collect({ retries: 0, fallback: largeFallback });
+    const guarded = await collect({ retries: 0, fallback: largeFallback, transport });
     check('数据量断崖下降时自动保留旧分区', guarded.ok && guarded.freshness.window7d === 'fallback' && guarded.data.window7d.length === 20);
 
-    global.fetch = async () => { throw new Error('all unavailable'); };
-    const failed = await collect({ retries: 0, fallback });
+    mockFetch = async () => { throw new Error('all unavailable'); };
+    const failed = await collect({ retries: 0, fallback, transport });
     check('核心接口全部失败时不生成伪成功快照', !failed.ok && /核心接口均未刷新/.test(failed.error));
   } finally {
-    global.fetch = originalFetch;
+    mockFetch = null;
   }
 
   console.log('\nPASS: ' + pass + '  FAIL: ' + fail);

@@ -15,6 +15,7 @@ const SECURITY_HEADERS = {
   'X-Frame-Options': 'SAMEORIGIN',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
 };
 
 const CORS_HEADERS = {
@@ -67,27 +68,60 @@ function parseBody(req, limitBytes) {
   });
 }
 
-// 客户端真实 IP：优先 EdgeOne 的受保护回源头，再读取通用代理头，最后回落 socket 地址。
-// EO-Connecting-IP 由 EdgeOne 生成，不能在规则引擎中被自定义覆盖。
+function ipv4Number(value) {
+  if (!net.isIPv4(value)) return null;
+  return value.split('.').reduce((sum, part) => ((sum << 8) | Number(part)) >>> 0, 0);
+}
+
+function addressMatchesRule(address, rule) {
+  const normalized = normalizeIp(address);
+  const value = String(rule || '').trim();
+  if (!value) return false;
+  if (!value.includes('/')) return normalizeIp(value) === normalized;
+  const parts = value.split('/');
+  const base = normalizeIp(parts[0]);
+  const bits = Number(parts[1]);
+  const ipNum = ipv4Number(normalized);
+  const baseNum = ipv4Number(base);
+  if (ipNum === null || baseNum === null || !Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return (ipNum & mask) === (baseNum & mask);
+}
+
+function trustedProxyRules() {
+  const configured = String(process.env.AIQB_TRUSTED_PROXIES || '').split(',').map((item) => item.trim()).filter(Boolean);
+  return ['127.0.0.1', '::1'].concat(configured);
+}
+
+function isTrustedProxy(req) {
+  const peer = normalizeIp(req && req.socket && req.socket.remoteAddress || '');
+  return net.isIP(peer) !== 0 && trustedProxyRules().some((rule) => addressMatchesRule(peer, rule));
+}
+
+// 仅在 TCP 对端属于显式可信反向代理时接受它覆盖写入的 X-Real-IP/X-Forwarded-For。
+// CDN 厂商头不会直接参与安全决策；应由 Nginx real_ip 模块在受信 CDN CIDR 上转换为 X-Real-IP。
 function clientIp(req) {
   const headers = req && req.headers || {};
-  const candidates = [
-    headers['eo-connecting-ip'],
-    headers['eo-client-ip'],
-    headers['true-client-ip'],
-    headers['x-forwarded-for'],
-    headers['x-real-ip'],
-  ];
-  for (const value of candidates) {
-    if (typeof value !== 'string' || !value.trim()) continue;
-    const values = value.split(',');
-    for (const part of values) {
-      const normalized = normalizeIp(part.trim());
-      if (net.isIP(normalized)) return normalized;
-    }
-  }
   const fallback = normalizeIp(req && req.socket && req.socket.remoteAddress || '');
+  if (!isTrustedProxy(req)) return net.isIP(fallback) ? fallback : 'unknown';
+  const real = normalizeIp(headers['x-real-ip'] || '');
+  if (net.isIP(real)) return real;
+  const forwarded = String(headers['x-forwarded-for'] || '').split(',').map((item) => normalizeIp(item)).filter((item) => net.isIP(item));
+  if (forwarded.length) {
+    let candidate = fallback;
+    for (let index = forwarded.length - 1; index >= 0; index--) {
+      if (!trustedProxyRules().some((rule) => addressMatchesRule(candidate, rule))) break;
+      candidate = forwarded[index];
+    }
+    if (net.isIP(candidate)) return candidate;
+  }
   return net.isIP(fallback) ? fallback : 'unknown';
+}
+
+function isSecureRequest(req) {
+  if (req && req.socket && req.socket.encrypted === true) return true;
+  if (!isTrustedProxy(req)) return false;
+  return String(req && req.headers && req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase() === 'https';
 }
 
 function normalizeIp(ip) {
@@ -106,6 +140,7 @@ function cleanGeoValue(value, limit) {
 
 // EdgeOne 可通过网络优化 / 规则引擎把这些字段回源。未配置的字段保持为空，绝不猜测。
 function clientGeo(req) {
+  if (!isTrustedProxy(req)) return { country: '', regionCode: '', region: '', city: '' };
   const h = req && req.headers || {};
   const first = (names, limit) => {
     for (const name of names) {
@@ -227,7 +262,7 @@ function createRateLimiter() {
 
 module.exports = {
   SECURITY_HEADERS, CORS_HEADERS,
-  parseCookies, parseBody, clientIp, clientGeo,
+  parseCookies, parseBody, clientIp, clientGeo, normalizeIp, isTrustedProxy, isSecureRequest,
   etagOf, wantsGzip, gzip, sendJSON, sendBuf,
   sameOriginGuard, createRateLimiter,
 };

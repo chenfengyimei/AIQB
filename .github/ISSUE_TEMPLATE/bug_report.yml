@@ -1,0 +1,34 @@
+name: Bug report
+description: 报告可以稳定复现的功能问题
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 请勿在公开 Issue 中提交密码、令牌、私钥、完整 IP 或未修复漏洞；安全问题请按 SECURITY.md 私密报告。
+  - type: input
+    id: version
+    attributes:
+      label: AIQB 版本
+      placeholder: 例如 2.26.0
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 运行环境
+      description: 操作系统、Node.js 版本、安装方式及是否使用反向代理/CDN；请先移除敏感信息。
+    validations:
+      required: true

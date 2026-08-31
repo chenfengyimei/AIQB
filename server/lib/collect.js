@@ -3,6 +3,8 @@
 
 'use strict';
 
+const { fetchText } = require('./safe-fetch');
+
 const UPSTREAM_BASE = String(process.env.AIQB_UPSTREAM_BASE_URL || 'https://upstream.invalid').trim().replace(/\/+$/, '');
 const API = UPSTREAM_BASE + '/api/v1';
 const UA = 'AIQB/2.0';
@@ -10,43 +12,42 @@ const UA = 'AIQB/2.0';
 const DEFAULT_TIMEOUT_MS = 30 * 1000;
 const RETRIES = 2; // 总尝试次数 = 1 + RETRIES
 const RETRY_DELAY_MS = 1200;
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
-async function fetchJSONOnce(url, timeoutMs) {
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': UA, 'Accept': 'application/json' },
-      signal: ac.signal,
-    });
-    const body = await res.text().catch(() => '');
+async function fetchJSONOnce(url, timeoutMs, transport) {
+  const res = await (transport || fetchText)(url, {
+    headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+    timeoutMs,
+    maxBytes: MAX_RESPONSE_BYTES,
+    maxWireBytes: MAX_RESPONSE_BYTES,
+    maxRedirects: 3,
+  });
+  const body = res.body || '';
     const meta = {
       httpStatus: res.status,
       etag: res.headers.get('etag'),
       cacheControl: res.headers.get('cache-control'),
       requestId: res.headers.get('x-request-id'),
       retryAfterSec: Number(res.headers.get('retry-after')) || null,
-      bytes: Buffer.byteLength(body),
+      bytes: res.bytes == null ? Buffer.byteLength(body) : res.bytes,
     };
     if (!res.ok) {
-      const error = new Error('HTTP ' + res.status + ' ' + url + ' :: ' + body.slice(0, 200));
+      const error = new Error('上游接口返回 HTTP ' + res.status);
       error.status = res.status;
       error.apiMeta = meta;
       throw error;
     }
     let data;
-    try { data = JSON.parse(body); } catch (error) { throw new Error('接口返回了无效 JSON: ' + url); }
-    if (!data || typeof data !== 'object') throw new Error('接口没有返回 JSON 对象: ' + url);
+    try { data = JSON.parse(body); } catch (error) { throw new Error('上游接口返回了无效 JSON'); }
+    if (!data || typeof data !== 'object') throw new Error('上游接口没有返回 JSON 对象');
     Object.defineProperty(data, '__apiMeta', { value: meta, enumerable: false });
     return data;
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 function retryable(error) {
+  if (error && typeof error.retryable === 'boolean') return error.retryable;
   const status = Number(error && error.status) || 0;
   return !status || status === 408 || status === 425 || status === 429 || status >= 500;
 }
@@ -58,7 +59,7 @@ async function fetchJSON(url, opts) {
   let lastErr = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      return await fetchJSONOnce(url, timeoutMs);
+      return await fetchJSONOnce(url, timeoutMs, o.transport);
     } catch (error) {
       lastErr = error;
       if (attempt >= retries || !retryable(error)) break;
@@ -142,6 +143,7 @@ async function loadPartition(id, name, endpoint, opts, fallback, extract) {
     const payload = await fetchJSON(endpoint.url, {
       timeoutMs: endpoint.timeoutMs || opts.timeoutMs,
       retries: endpoint.retries === undefined ? opts.retries : endpoint.retries,
+      transport: opts.transport,
     });
     const value = extract(payload);
     const meta = payload.__apiMeta || {};
@@ -223,4 +225,4 @@ async function collect(opts) {
   };
 }
 
-module.exports = { collect, fetchJSON, cleanItems, API };
+module.exports = { collect, fetchJSON, fetchJSONOnce, cleanItems, API };

@@ -16,6 +16,7 @@ const child = spawn(process.execPath, [path.join(root, 'server', 'server.js')], 
     AIQB_PORT: String(port),
     AIQB_HOST: '127.0.0.1',
     AIQB_ENDPOINT_PRESET: 'community',
+    AIQB_INITIAL_ADMIN_PASSWORD: 'Community-Test-Password-2026',
   }),
   stdio: ['ignore', 'pipe', 'pipe'],
 });

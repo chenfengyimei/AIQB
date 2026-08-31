@@ -18,7 +18,9 @@ const path = require('path');
 
 // ==================== 配置 ====================
 const SITEMAP_URL = 'https://chenqiyuan.cn/sitemap.xml';
-const BAIDU_API_BASE = 'http://data.zz.baidu.com/urls';
+// 百度当前公开文档仍只给出明文 HTTP 地址；为避免 Token 在链路与中间日志中泄露，
+// 正式提交默认停用。只有百度提供证书有效的 HTTPS 地址后才通过环境变量启用。
+const BAIDU_API_BASE = String(process.env.BAIDU_API_URL || '').trim();
 const BAIDU_SITE = 'chenqiyuan.cn';
 const STATE_FILE_PATH = path.join(__dirname, '..', '.baidu-push-state.json');
 const ARTICLE_PREFIX = 'https://chenqiyuan.cn/article/';
@@ -202,6 +204,13 @@ async function preCheckArticle(url) {
 async function submitToBaidu(url) {
   if (!TOKEN) {
     return { status: 'error', reason: '环境变量 BAIDU_PUSH_TOKEN 未设置', stop: true };
+  }
+  let endpoint;
+  try { endpoint = new URL(BAIDU_API_BASE); } catch (_) {
+    return { status: 'error', reason: '安全策略已停用百度 API 自动提交：未配置有效 HTTPS 接口', stop: true };
+  }
+  if (endpoint.protocol !== 'https:' || endpoint.hostname !== 'data.zz.baidu.com' || endpoint.username || endpoint.password || endpoint.port || endpoint.pathname !== '/urls') {
+    return { status: 'error', reason: 'BAIDU_API_URL 必须是证书有效的 https://data.zz.baidu.com/urls', stop: true };
   }
   const apiUrl = BAIDU_API_BASE + '?site=' + encodeURIComponent(BAIDU_SITE) + '&token=' + TOKEN;
 
@@ -460,7 +469,9 @@ function printReport(report) {
   log('==============================');
 }
 
-main().catch((e) => {
+if (require.main === module) main().catch((e) => {
   log('程序异常: ' + e.message);
   process.exit(1);
 });
+
+module.exports = { submitToBaidu, filterArticles, sortArticles, normalizeUrl };

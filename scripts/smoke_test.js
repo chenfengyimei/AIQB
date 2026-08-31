@@ -15,6 +15,7 @@ const SERVER = path.join(ROOT, 'server', 'server.js');
 const PORT = 3999;
 const BASE = 'http://127.0.0.1:' + PORT;
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'aiqb-smoke-'));
+const INITIAL_ADMIN_PASSWORD = 'Smoke-Admin-Password-2026';
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -87,7 +88,7 @@ async function main() {
   console.log('数据目录: ' + DATA_DIR);
   seedSmokeData();
   const child = spawn(process.execPath, [SERVER], {
-    env: Object.assign({}, process.env, { AIQB_DATA_DIR: DATA_DIR, AIQB_PORT: String(PORT), AIQB_HOST: '127.0.0.1', AIQB_ENDPOINT_PRESET: 'full' }),
+    env: Object.assign({}, process.env, { AIQB_DATA_DIR: DATA_DIR, AIQB_PORT: String(PORT), AIQB_HOST: '127.0.0.1', AIQB_ENDPOINT_PRESET: 'full', AIQB_INITIAL_ADMIN_PASSWORD: INITIAL_ADMIN_PASSWORD }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let serverLog = '';
@@ -118,8 +119,8 @@ async function main() {
     console.log('\n[2] 静态托管');
     const home = await req('GET', '/');
     check('GET / 200 HTML', home.status === 200 && home.text.indexOf('<!DOCTYPE html>') === 0);
-    const geoHome = await req('GET', '/?geo-test=1', { headers: { 'EO-Connecting-IP': '198.51.100.42', 'EO-Client-IPCountry': 'CN', 'EO-Client-Region-Code': 'CN-GD', 'EO-Client-Region': 'Guangdong', 'EO-Client-City': 'Shenzhen' } });
-    check('EdgeOne 真实 IP 与地域回源头可用于统计', geoHome.status === 200);
+    const geoHome = await req('GET', '/?geo-test=1', { headers: { 'X-Real-IP': '8.8.8.42', 'EO-Connecting-IP': '127.0.0.1', 'EO-Client-IPCountry': 'CN', 'EO-Client-Region-Code': 'CN-GD', 'EO-Client-Region': 'Guangdong', 'EO-Client-City': 'Shenzhen' } });
+    check('可信本机反向代理覆盖的真实 IP 可用于统计且厂商 IP 头不参与鉴权', geoHome.status === 200);
     check('中文首页同时建立 AI圈报与 AIQB 品牌信号', home.text.indexOf('<title>AI圈报（AIQB）- 每日AI资讯、大模型动态、AI产品与行业热点</title>') !== -1 && home.text.indexOf('<h1>AI圈报（AIQB）：每日 AI 资讯与大模型动态</h1>') !== -1 && home.text.indexOf('"name":"AI圈报"') !== -1 && home.text.indexOf('"alternateName":"AIQB"') !== -1 && home.text.indexOf('"@id":"https://chenqiyuan.cn/#organization"') !== -1);
     check('首页默认展示版权和 ICP 备案链接', home.text.indexOf('2025–2026 Copyright © AI圈报') !== -1 && home.text.indexOf('粤ICP备2025432484号') !== -1 && home.text.indexOf('https://beian.miit.gov.cn/') !== -1);
     check('首页固定展示可点击的 AIQB 项目来源署名', home.text.indexOf('设计与开发由') !== -1 && home.text.indexOf('href="https://github.com/chenfengyimei/AIQB"') !== -1 && home.text.indexOf('class="project-attribution"') !== -1);
@@ -225,10 +226,10 @@ async function main() {
     // ---------- 登录与会话 ----------
     console.log('\n[4] 登录认证');
     const pwdFile = path.join(DATA_DIR, 'auth', 'initial-password.txt');
-    check('初始密码文件已生成', fs.existsSync(pwdFile));
-    const m = fs.readFileSync(pwdFile, 'utf8').match(/密码:\s*(\S+)/);
-    check('初始密码可解析', !!m);
-    const initPwd = m ? m[1] : '';
+    check('首次管理员密码不生成明文文件', !fs.existsSync(pwdFile));
+    if (process.platform !== 'win32') check('认证目录权限为 0700', (fs.statSync(path.dirname(pwdFile)).mode & 0o777) === 0o700);
+    check('首次管理员密码不会写入服务日志', serverLog.indexOf(INITIAL_ADMIN_PASSWORD) === -1);
+    const initPwd = INITIAL_ADMIN_PASSWORD;
 
     const badLogin = await req('POST', '/api/admin/login', {
       headers: { 'Content-Type': 'application/json' },
@@ -269,7 +270,7 @@ async function main() {
       headers: H, body: JSON.stringify({ currentPassword: initPwd, newPassword: 'new-password-123' }),
     });
     check('改密码成功 200', chPwd.status === 200);
-    check('改密码后初始密码文件被删除', !fs.existsSync(pwdFile));
+    check('改密码后仍不存在明文初始密码文件', !fs.existsSync(pwdFile));
     const relogin = await req('POST', '/api/admin/login', {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: 'admin', password: 'new-password-123' }),
@@ -303,7 +304,7 @@ async function main() {
     check('健康接口包含滚动响应指标与整体状态', ['healthy','warning','critical'].includes(adminHealth.json.overall) && adminHealth.json.response.recent && typeof adminHealth.json.response.recent.p95Ms === 'number' && adminHealth.json.response.recent.count > 0 && adminHealth.json.process.eventLoopLagMs >= 0);
     check('健康接口可识别采集器心跳与独立实例', adminHealth.json.checks.some((item) => item.key === 'collector') && adminHealth.json.data.collect.heartbeatAt && adminHealth.json.data.collect.heartbeatAgeSec >= 0);
     const about = await req('GET', '/api/admin/about', { headers: { 'Cookie': cookie3 } });
-    check('关于系统返回版本、作者、运行环境、双仓库、哔哩哔哩与协议', about.status === 200 && about.json.system.version === '2.25.0' && about.json.system.author === 'chenfeng' && about.json.system.githubUrl === 'https://github.com/chenfengyimei/AIQB' && about.json.system.giteeUrl === 'https://gitee.com/chenfengloveyuri/aiqb' && about.json.system.bilibiliUrl === 'https://space.bilibili.com/508302628' && about.json.system.license && about.json.system.license.id === 'CPAL-1.0' && about.json.sources.length === 2);
+    check('关于系统返回版本、作者、运行环境、双仓库、哔哩哔哩与协议', about.status === 200 && about.json.system.version === '2.27.0' && about.json.system.author === 'chenfeng' && about.json.system.githubUrl === 'https://github.com/chenfengyimei/AIQB' && about.json.system.giteeUrl === 'https://gitee.com/chenfengloveyuri/aiqb' && about.json.system.bilibiliUrl === 'https://space.bilibili.com/508302628' && about.json.system.license && about.json.system.license.id === 'CPAL-1.0' && about.json.sources.length === 2);
     const updateInfo = await req('GET', '/api/admin/update', { headers: { 'Cookie': cookie3 } });
     check('在线更新返回 GitHub/Gitee 双源、状态与安全措施', updateInfo.status === 200 && updateInfo.json.sources.some((s) => s.id === 'github') && updateInfo.json.sources.some((s) => s.id === 'gitee') && Array.isArray(updateInfo.json.safeguards) && !JSON.stringify(updateInfo.json).includes('AIQB_UPDATE_GITHUB_TOKEN'));
     const crossUpdate = await req('POST', '/api/admin/update/apply', { headers: Object.assign({}, H3, { Origin: 'https://evil.example.com' }), body: JSON.stringify({ source: 'github', expectedVersion: '9.9.9' }) });
@@ -497,12 +498,16 @@ async function main() {
     const logs = await req('GET', '/api/admin/logs?lines=50', { headers: { 'Cookie': cookie3 } });
     check('GET logs 200 且有采集日志', logs.status === 200 && logs.json.lines && logs.json.lines.length > 0);
     const refresh = await req('GET', '/api/refresh');
-    check('GET /api/refresh 返回（限流或结果）', [200, 202, 429, 502].indexOf(refresh.status) !== -1, 'status=' + refresh.status);
+    check('公开 GET /api/refresh 已关闭且不会触发采集', refresh.status === 404, 'status=' + refresh.status);
     const refresh2 = await req('GET', '/api/refresh');
-    check('GET /api/refresh 二次触发被限流 429', refresh2.status === 429);
+    check('重复访问公开刷新入口仍保持关闭', refresh2.status === 404);
 
     // ---------- 登出与限流 ----------
     console.log('\n[9] 登出与登录限流');
+    const crossLogout = await req('POST', '/api/admin/logout', { headers: Object.assign({}, H3, { Origin: 'https://evil.example.com' }) });
+    check('跨站注销请求被同源保护拒绝', crossLogout.status === 403);
+    const meStill = await req('GET', '/api/admin/me', { headers: { 'Cookie': cookie3 } });
+    check('被拒绝的跨站注销不会撤销合法会话', meStill.status === 200);
     const logout = await req('POST', '/api/admin/logout', { headers: H3 });
     check('登出 200 且清除 Cookie', logout.status === 200 && /Max-Age=0/.test(logout.headers.get('set-cookie') || ''));
     const meAfter = await req('GET', '/api/admin/me', { headers: { 'Cookie': cookie3 } });
@@ -581,7 +586,7 @@ async function main() {
     const visitsFile = path.join(DATA_DIR, 'stats', fs.readdirSync(path.join(DATA_DIR, 'stats')).find((f) => /^visits-.*\.jsonl$/.test(f)));
     const visitLines = fs.readFileSync(visitsFile, 'utf8').split('\n').filter((l) => l.trim());
     const visitRecords = visitLines.map((line) => { try { return JSON.parse(line); } catch (e) { return null; } }).filter(Boolean);
-    check('当日流水保存日级哈希、IP 网段与地域且不落完整 IP', visitRecords.length > 0 && visitRecords.some((line) => line.seg === '198.51.100.0/24' && line.g && line.g.regionCode === 'CN-GD') && !/\b(?:127\.0\.0\.1|198\.51\.100\.42)\b/.test(JSON.stringify(visitRecords)));
+    check('当日流水保存日级哈希、IP 网段与地域且不落完整 IP', visitRecords.length > 0 && visitRecords.some((line) => line.seg === '8.8.8.0/24' && line.g && line.g.regionCode === 'CN-GD') && !/\b(?:127\.0\.0\.1|8\.8\.8\.42)\b/.test(JSON.stringify(visitRecords)));
   } finally {
     child.kill();
     await sleep(300);

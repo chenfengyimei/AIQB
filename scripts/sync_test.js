@@ -7,7 +7,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { SelectedSync, AllPoolSync } = require('../server/lib/sync');
+const { SelectedSync, AllPoolSync, MAX_TOTAL_ITEMS, MAX_TOTAL_BYTES, assertRunBudget } = require('../server/lib/sync');
 const { EndpointRegistry } = require('../server/lib/endpoint-registry');
 const { IntelligenceStore } = require('../server/lib/intelligence-store');
 
@@ -57,6 +57,13 @@ function queueFetch(sync, queue) {
 function clearSyncState() { try { fs.rmSync(path.join(dir, 'sync', 'state.json'), { force: true }); } catch (error) {} }
 
 async function main() {
+  console.log('\n[0] 单轮同步资源预算');
+  let itemLimitBlocked = false;
+  let byteLimitBlocked = false;
+  try { assertRunBudget(MAX_TOTAL_ITEMS + 1, 0); } catch (error) { itemLimitBlocked = /条目超过/.test(error.message); }
+  try { assertRunBudget(0, MAX_TOTAL_BYTES + 1); } catch (error) { byteLimitBlocked = /响应累计/.test(error.message); }
+  check('累计条目超过上限立即中止', itemLimitBlocked);
+  check('累计响应体超过上限立即中止', byteLimitBlocked);
   console.log('\n[1] 首次引导：分页拉取完整精选集');
   const ctx = buildSync();
   const { sync, intelligence, registry } = ctx;

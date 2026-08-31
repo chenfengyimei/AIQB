@@ -107,7 +107,7 @@ async function main() {
     console.log('  数据: ' + result.dataDir);
     console.log('  接口预设: ' + result.preset + (result.preset === 'community' ? '（仅 AI圈报 RSS）' : ''));
   }
-  console.log('下一步: npm start，然后访问 /chenfengadmin 获取初始账号并完成设置。');
+  console.log('下一步: 先运行 npm run admin:bootstrap 设置后台密码，再运行 npm start。');
 }
 
 if (require.main === module) main().catch((error) => { console.error('安装配置失败: ' + error.message); process.exitCode = 1; });
