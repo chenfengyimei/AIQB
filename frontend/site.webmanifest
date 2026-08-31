@@ -1,0 +1,25 @@
+{
+  "name": "AI圈报 AIQB",
+  "short_name": "AIQB",
+  "description": "AI圈报（AIQB）每日整理 AI 资讯、大模型动态、产品、论文、教程与行业热点。",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f6fb",
+  "theme_color": "#0b5cff",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

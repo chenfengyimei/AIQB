@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex, nofollow" />
+<title>管理后台 · AI圈报</title>
+<meta name="theme-color" content="#0b5cff" id="meta-theme" />
+<link rel="icon" id="admin-favicon" href="/favicon.ico" />
+<style>html{background:#f7f8fc}body{margin:0;color:#172033;font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}</style>
+<link rel="preload" href="/admin.d10c6c26bf96.css" as="style" />
+<link rel="stylesheet" href="/admin.d10c6c26bf96.css" />
+</head>
+<body>
+
+<!-- ============ 登录页 ============ -->
+<div id="login-view">
+  <div class="login-card">
+    <div class="logo"><span class="ic" id="admin-login-logo">AI</span><div><h1 id="admin-login-title">AI圈报管理后台</h1></div></div>
+    <div class="sub">数据概览 · 健康管理 · 访问统计 · 采集管理</div>
+    <div class="login-err" id="login-err"></div>
+    <form id="login-form" autocomplete="on">
+      <div class="field">
+        <label for="login-user">用户名</label>
+        <input id="login-user" type="text" placeholder="请输入用户名" required maxlength="32" autocomplete="username" />
+      </div>
+      <div class="field">
+        <label for="login-pass">密码</label>
+        <div class="password-wrap"><input id="login-pass" type="password" placeholder="请输入密码" required maxlength="128" autocomplete="current-password" /><button class="password-toggle" type="button" id="login-pass-toggle" aria-label="显示密码">显示</button></div>
+      </div>
+      <button class="btn-primary" type="submit" id="login-btn">登 录</button>
+    </form>
+    <div class="login-foot"><a href="/">← 返回公开看板</a></div>
+  </div>
+</div>
+
+<!-- ============ 应用框架 ============ -->
+<div id="app-view">
+  <aside class="sidebar">
+    <div class="brand"><span class="ic" id="admin-sidebar-logo">AI</span><div><b id="admin-sidebar-title">AI圈报后台</b><span>AI 情报管理系统</span></div></div>
+    <nav id="side-nav">
+      <button class="nav-item on" data-view="overview"><span class="ico">📊</span>数据概览</button>
+      <button class="nav-item" data-view="health"><span class="ico">🩺</span>健康管理</button>
+      <button class="nav-item" data-view="visits"><span class="ico">📈</span>访问统计</button>
+      <button class="nav-item" data-view="intelligence"><span class="ico">📰</span>情报管理</button>
+      <button class="nav-item" data-view="endpoints"><span class="ico">🔌</span>接口管理</button>
+      <button class="nav-item" data-view="email"><span class="ico">✉️</span>邮箱管理</button>
+      <button class="nav-item" data-view="seo"><span class="ico">🔎</span>SEO 管理</button>
+      <button class="nav-item" data-view="friendLinks"><span class="ico">🔗</span>友链管理</button>
+      <button class="nav-item" data-view="snapshots"><span class="ico">🗄</span>数据快照</button>
+      <button class="nav-item" data-view="logs"><span class="ico">📋</span>采集日志</button>
+      <button class="nav-item" data-view="settings"><span class="ico">⚙</span>系统设置</button>
+      <button class="nav-item" data-view="update"><span class="ico">⬆</span>在线更新</button>
+      <button class="nav-item" data-view="about"><span class="ico">ⓘ</span>关于系统</button>
+    </nav>
+    <div class="side-foot">
+      <a href="/" target="_blank" rel="noopener">🌐 查看看板</a>
+      <button id="btn-logout-side">⎋ 退出登录</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <h2 id="view-title">数据概览</h2>
+      <span class="sync-chip" id="topbar-sync"><span class="dot"></span><span>连接正常</span></span>
+      <span class="user-chip"><span class="dot"></span><span class="u-name" id="topbar-user">—</span></span>
+      <button class="icon-btn" id="btn-view-refresh" title="刷新当前页面" aria-label="刷新当前页面">↻</button>
+      <button class="icon-btn" id="btn-theme" title="切换深色 / 浅色模式">◐</button>
+    </div>
+    <div class="content" id="view"></div>
+  </div>
+</div>
+
+<!-- ============ 快照详情弹层 ============ -->
+<div class="modal-mask" id="snap-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="snap-modal-title">快照详情</h3>
+      <button class="modal-close" id="snap-modal-close" title="关闭">×</button>
+    </div>
+    <div id="snap-modal-body"></div>
+  </div>
+</div>
+
+<div id="toast-box"></div>
+
+<script src="/admin.954d48541a77.js" defer></script>
+</body>
+</html>

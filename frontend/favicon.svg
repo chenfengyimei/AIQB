@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="AI圈报 AIQB">
+  <defs>
+    <linearGradient id="bg" x1="52" y1="38" x2="462" y2="478" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0b6bff"/>
+      <stop offset="0.52" stop-color="#0b5cff"/>
+      <stop offset="1" stop-color="#713cff"/>
+    </linearGradient>
+    <linearGradient id="pulse" x1="151" y1="202" x2="364" y2="304" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff3a6"/>
+      <stop offset="1" stop-color="#ffd34f"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="124" fill="url(#bg)"/>
+  <path d="M372 369 423 420" fill="none" stroke="#fff" stroke-width="52" stroke-linecap="round"/>
+  <circle cx="252" cy="244" r="139" fill="none" stroke="#fff" stroke-width="54"/>
+  <path d="M143 257h57l31-67 47 125 35-76h58" fill="none" stroke="url(#pulse)" stroke-width="25" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

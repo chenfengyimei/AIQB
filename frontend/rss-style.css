@@ -1,0 +1,133 @@
+@namespace atom url("http://www.w3.org/2005/Atom");
+
+:root {
+  color-scheme: light dark;
+  --bg: #f5f7fb;
+  --card: #ffffff;
+  --text: #101828;
+  --muted: #667085;
+  --line: #e4e7ec;
+  --brand: #0b5cff;
+  --tag: #edf4ff;
+}
+
+rss {
+  display: block;
+  min-height: 100%;
+  margin: 0;
+  padding: 36px 16px 56px;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+rss::before {
+  content: "AI圈报 · 标准 RSS 订阅源";
+  display: block;
+  width: min(920px, 100%);
+  margin: 0 auto 10px;
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
+channel {
+  display: block;
+  width: min(920px, 100%);
+  margin: auto;
+}
+
+channel > title {
+  display: block;
+  margin-bottom: 8px;
+  font-size: clamp(28px, 5vw, 42px);
+  font-weight: 800;
+  line-height: 1.22;
+}
+
+channel > description {
+  display: block;
+  margin-bottom: 22px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+channel > link,
+channel > language,
+channel > lastBuildDate,
+channel > atom|link,
+item > guid {
+  display: none;
+}
+
+item {
+  display: block;
+  margin: 0 0 12px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: 0 5px 20px rgba(16, 24, 40, .04);
+}
+
+item > title {
+  display: block;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+item > category,
+item > pubDate {
+  display: inline-block;
+  margin: 7px 8px 7px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+item > category {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--tag);
+  color: var(--brand);
+}
+
+item > description {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+item > link {
+  display: block;
+  margin-top: 10px;
+  color: var(--brand);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+item > link::before {
+  content: "站内文章：";
+  color: var(--muted);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b1020;
+    --card: #121834;
+    --text: #e7ecf8;
+    --muted: #a4afc8;
+    --line: #27304f;
+    --brand: #70a5ff;
+    --tag: #182d56;
+  }
+}
+
+@media (max-width: 600px) {
+  rss { padding: 24px 12px 44px; }
+  item { padding: 15px 16px; border-radius: 12px; }
+  item > title { font-size: 16px; }
+}

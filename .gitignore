@@ -1,0 +1,18 @@
+# 本地留档（不入库）
+screenshots/
+docs/最后修复步骤.md
+scripts/remote_*.sh
+
+# 运行时数据（认证凭据/访问统计，仅存在于服务器）
+server/data/
+
+# 本地运行数据
+.baidu-push-state.json
+
+# 构建产物与临时文件
+*.tar.gz
+h.txt
+h2.txt
+node_modules/
+.DS_Store
+Thumbs.db

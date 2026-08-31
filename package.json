@@ -1,0 +1,30 @@
+{
+  "name": "aiqb",
+  "version": "2.25.0",
+  "private": true,
+  "description": "可自托管的 AI 情报采集、去重、归档、展示与运营管理系统",
+  "license": "CPAL-1.0",
+  "author": {
+    "name": "chenfeng",
+    "url": "https://space.bilibili.com/508302628"
+  },
+  "homepage": "https://github.com/chenfengyimei/AIQB",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chenfengyimei/AIQB.git"
+  },
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "setup": "node scripts/setup.js",
+    "test:install": "node scripts/community_install_test.js",
+    "test": "node scripts/setup_test.js && node scripts/state_db_test.js && node scripts/backup_data_test.js && node scripts/update_manager_test.js && node scripts/multiprocess_state_test.js && node scripts/collector_recovery_test.js && node scripts/collect_test.js && node scripts/sync_test.js && node scripts/endpoint_registry_test.js && node scripts/community_install_test.js && node scripts/intelligence_store_test.js && node scripts/stats_test.js && node scripts/smoke_test.js",
+    "perf": "node scripts/perf_test.js"
+  },
+  "engines": {
+    "node": ">=20 <26"
+  },
+  "dependencies": {
+    "better-sqlite3": "12.9.0"
+  }
+}

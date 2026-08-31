@@ -1,0 +1,9 @@
+.baidu-push-state.json
+server/data/
+screenshots/
+docs/
+scripts/remote_*.sh
+*.tar.gz
+*.log
+h.txt
+h2.txt

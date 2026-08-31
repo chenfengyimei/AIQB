@@ -1,0 +1,51 @@
+AIQB Attribution Notice
+=======================
+
+Copyright (c) 2025-2026 chenfeng / AIQB
+
+AIQB is licensed under the Common Public Attribution License Version 1.0
+(CPAL-1.0). Commercial use, including paid operation, is permitted subject to
+the complete terms in LICENSE.
+
+Required user-interface attribution:
+
+    设计与开发由 AIQB
+    https://github.com/chenfengyimei/AIQB
+
+The attribution above must remain visible and functional in the public
+frontend of the Original Code, Modifications, and Larger Works as specified in
+Exhibit B. It must not be removed, hidden, obscured, or made non-functional.
+
+Network deployment of Modified Code is treated as distribution under Section
+15 of CPAL-1.0 and requires the corresponding source to be made available as
+described by the License.
+
+Redistributors and network deployers must preserve this NOTICE, the complete
+LICENSE, applicable Exhibit A notices, and a dated description of their
+modifications. A non-binding Simplified Chinese explanation is available in
+LICENSE.zh-CN.md.
+
+Author: chenfeng
+Bilibili: https://space.bilibili.com/508302628
+GitHub: https://github.com/chenfengyimei/AIQB
+Gitee: https://gitee.com/chenfengloveyuri/aiqb
+
+Source Code Notice (CPAL-1.0 Exhibit A)
+---------------------------------------
+
+The contents of this repository are subject to the Common Public Attribution
+License Version 1.0 (the "License"); you may not use the files except in
+compliance with the License. You may obtain a copy of the License at:
+
+    https://opensource.org/license/cpal-1.0
+
+The License is based on the Mozilla Public License Version 1.1, with Sections
+14 and 15 added to cover software used over a computer network and limited
+attribution for the Original Developer. Software is distributed on an "AS IS"
+basis, WITHOUT WARRANTY OF ANY KIND. See LICENSE for the specific language
+governing rights and limitations.
+
+The Original Code is AIQB. The Original Developer and Initial Developer is
+chenfeng. All portions of the code written by chenfeng are Copyright (c)
+2025-2026 chenfeng. All Rights Reserved. Contributors are identified in the
+Git commit history. No alternative license is offered.
