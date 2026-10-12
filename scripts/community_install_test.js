@@ -4,6 +4,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { EndpointRegistry } = require('../server/lib/endpoint-registry');
 
 const root = path.join(__dirname, '..');
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiqb-community-install-'));
@@ -34,6 +35,17 @@ async function json(url) {
 }
 
 async function main() {
+  // 离线模式：首次 RSS 采集依赖真实外网（community 预设指向 chenqiyuan.cn/rss.xml）。
+  // 设 AIQB_TEST_OFFLINE=1 跳过联网断言，只校验安装与预设配置。
+  if (process.env.AIQB_TEST_OFFLINE === '1') {
+    const registry = new EndpointRegistry(dataDir, { preset: 'community' });
+    registry.init();
+    const rss = registry.get('aiqbRss');
+    if (!rss || rss.enabled !== true) throw new Error('community 预设缺少 AI圈报 RSS 接口');
+    if (registry.list().items.filter((item) => !item.custom).length !== 1) throw new Error('community 预设应只有一个内置接口');
+    console.log('SKIP 首次联网采集（AIQB_TEST_OFFLINE=1），已校验 community 预设配置');
+    return;
+  }
   let ready = null;
   for (let i = 0; i < 120; i++) {
     await sleep(500);

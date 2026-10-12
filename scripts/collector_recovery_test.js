@@ -5,11 +5,14 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { StateDatabase } = require('../server/lib/state-db');
+const { Store } = require('../server/lib/store');
+const { IntelligenceStore } = require('../server/lib/intelligence-store');
 
 const ROOT = path.join(__dirname, '..');
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'aiqb-collector-recovery-'));
 const PORT = 4300 + Math.floor(Math.random() * 500);
 const BASE = 'http://127.0.0.1:' + PORT;
+const OFFLINE = process.env.AIQB_TEST_OFFLINE === '1';
 let pass = 0;
 let fail = 0;
 
@@ -35,9 +38,34 @@ async function waitFor(predicate, timeoutMs) {
   return null;
 }
 
+function readRuntime() {
+  try {
+    const db = new StateDatabase(DATA_DIR).init();
+    const runtime = db.getJSON('runtime', 'collect');
+    db.close();
+    return runtime;
+  } catch (_) { return null; }
+}
+
 async function main() {
+  // 在线模式：社区预设真实 RSS 采集成功即视为恢复完成（依赖外网）。
+  // 离线模式（AIQB_TEST_OFFLINE=1）：预置快照让公开数据立即可用，并用 4 秒租约锁
+  // 验证同一套状态机——遇锁暂缓、租约到期后重试获取、完成一次完整采集循环（结果因断网为失败但正常落状态）。
   const seed = new StateDatabase(DATA_DIR).init();
-  check('可预置模拟崩溃遗留的采集锁', seed.acquireLock('collect', 'dead-worker', 1000) === true);
+  check('可预置模拟崩溃遗留的采集锁', seed.acquireLock('collect', 'dead-worker', OFFLINE ? 4000 : 1000) === true);
+  if (OFFLINE) {
+    const snapshot = {
+      fetchedAt: new Date().toISOString(),
+      window7d: [{ id: 'seed-1', title: '离线种子情报', summary: '用于离线验证公开数据可用', source: { name: '测试' }, links: { original: 'https://example.com/seed-1' }, category: 'industry', publishedAt: new Date().toISOString() }],
+      window24h: [], hot: [], daily: null,
+    };
+    const store = new Store(DATA_DIR, null);
+    store.init();
+    store.saveSuccess(snapshot, { durationMs: 1, trigger: 'seed' });
+    const intel = new IntelligenceStore(DATA_DIR, seed);
+    intel.init();
+    intel.ingestSnapshot(snapshot, { trigger: 'seed' });
+  }
   seed.close();
 
   const child = spawn(process.execPath, [path.join(ROOT, 'server', 'server.js')], {
@@ -61,14 +89,25 @@ async function main() {
   child.stderr.on('data', (chunk) => { logs += chunk.toString(); });
 
   try {
-    const ready = await waitFor((body) => body.fetchedAt && body.intelligence > 0, 15000);
-    check('启动遇到旧锁后会短间隔自动重试并完成采集', !!ready, logs.slice(-800));
-    check('恢复后公开数据和默认 RSS 接口均正常', !!(ready && ready.items7d > 0 && ready.endpoints.total === 1 && ready.endpoints.healthy === 1));
-
-    const inspect = new StateDatabase(DATA_DIR).init();
-    const runtime = inspect.getJSON('runtime', 'collect');
-    check('采集器持续写入心跳、所有者和下次运行时间', !!(runtime && runtime.heartbeatAt && runtime.owner && runtime.busy === false && runtime.nextCollectAt > Date.now()));
-    inspect.close();
+    if (OFFLINE) {
+      const ready = await waitFor((body) => body.fetchedAt && body.intelligence > 0, 15000);
+      check('离线模式下预置快照可提供公开数据', !!(ready && ready.items7d > 0));
+      // 等待采集循环完成一轮：遇锁暂缓（4 秒租约）→ 到期重试获取 → 运行并落状态
+      let runtime = null;
+      for (let i = 0; i < 40; i++) {
+        runtime = readRuntime();
+        if (runtime && runtime.last && runtime.owner && runtime.owner !== 'dead-worker') break;
+        await sleep(500);
+      }
+      check('启动遇到旧锁后会短间隔自动重试并完成采集循环', !!(runtime && runtime.last && /采集暂缓/.test(logs)), logs.slice(-800));
+      check('恢复后公开数据与默认接口配置正常', !!(ready && ready.items7d > 0 && ready.endpoints.total === 1));
+    } else {
+      const ready = await waitFor((body) => body.fetchedAt && body.intelligence > 0, 15000);
+      check('启动遇到旧锁后会短间隔自动重试并完成采集', !!ready, logs.slice(-800));
+      check('恢复后公开数据和默认 RSS 接口均正常', !!(ready && ready.items7d > 0 && ready.endpoints.total === 1 && ready.endpoints.healthy === 1));
+      const runtime = readRuntime();
+      check('采集器持续写入心跳、所有者和下次运行时间', !!(runtime && runtime.heartbeatAt && runtime.owner && runtime.busy === false && runtime.nextCollectAt > Date.now()));
+    }
   } finally {
     child.kill('SIGTERM');
     await Promise.race([

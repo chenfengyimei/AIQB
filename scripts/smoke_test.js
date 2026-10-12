@@ -9,10 +9,12 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { DEFAULTS } = require('../server/lib/config');
 
 const ROOT = path.join(__dirname, '..');
 const SERVER = path.join(ROOT, 'server', 'server.js');
-const PORT = 3999;
+// 固定 3999 在并发/占用时直接挂；加随机偏移避开
+const PORT = 3999 + Math.floor(Math.random() * 500);
 const BASE = 'http://127.0.0.1:' + PORT;
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'aiqb-smoke-'));
 const INITIAL_ADMIN_PASSWORD = 'Smoke-Admin-Password-2026';
@@ -121,8 +123,8 @@ async function main() {
     check('GET / 200 HTML', home.status === 200 && home.text.indexOf('<!DOCTYPE html>') === 0);
     const geoHome = await req('GET', '/?geo-test=1', { headers: { 'X-Real-IP': '8.8.8.42', 'EO-Connecting-IP': '127.0.0.1', 'EO-Client-IPCountry': 'CN', 'EO-Client-Region-Code': 'CN-GD', 'EO-Client-Region': 'Guangdong', 'EO-Client-City': 'Shenzhen' } });
     check('可信本机反向代理覆盖的真实 IP 可用于统计且厂商 IP 头不参与鉴权', geoHome.status === 200);
-    check('中文首页同时建立 AI圈报与 AIQB 品牌信号', home.text.indexOf('<title>AI圈报（AIQB）- 每日AI资讯、大模型动态、AI产品与行业热点</title>') !== -1 && home.text.indexOf('<h1>AI圈报（AIQB）：每日 AI 资讯与大模型动态</h1>') !== -1 && home.text.indexOf('"name":"AI圈报"') !== -1 && home.text.indexOf('"alternateName":"AIQB"') !== -1 && home.text.indexOf('"@id":"https://chenqiyuan.cn/#organization"') !== -1);
-    check('首页默认展示版权和 ICP 备案链接', home.text.indexOf('2025–2026 Copyright © AI圈报') !== -1 && home.text.indexOf('粤ICP备2025432484号') !== -1 && home.text.indexOf('https://beian.miit.gov.cn/') !== -1);
+    check('中文首页同时建立 AI圈报与 AIQB 品牌信号', home.text.indexOf('<title>' + DEFAULTS.seoSiteTitle + '</title>') !== -1 && home.text.indexOf('<h1>AI圈报（AIQB）：每日 AI 资讯与大模型动态</h1>') !== -1 && home.text.indexOf('"name":"' + DEFAULTS.seoShortTitle + '"') !== -1 && home.text.indexOf('"alternateName":"' + DEFAULTS.siteBrandAlias + '"') !== -1 && home.text.indexOf('"@id":"' + DEFAULTS.seoSiteUrl + '/#organization"') !== -1);
+    check('首页默认展示版权和 ICP 备案链接', home.text.indexOf(DEFAULTS.footerCopyrightText) !== -1 && home.text.indexOf(DEFAULTS.footerIcpNumber) !== -1 && home.text.indexOf(DEFAULTS.footerIcpUrl) !== -1);
     check('首页固定展示可点击的 AIQB 项目来源署名', home.text.indexOf('设计与开发由') !== -1 && home.text.indexOf('href="https://github.com/chenfengyimei/AIQB"') !== -1 && home.text.indexOf('class="project-attribution"') !== -1);
     const homeGz = await req('GET', '/', { headers: { 'Accept-Encoding': 'gzip' } });
     check('GET / gzip 压缩生效', homeGz.headers.get('content-encoding') === 'gzip');
@@ -136,7 +138,7 @@ async function main() {
     const rawAdmin = await req('GET', '/admin.html');
     check('旧后台入口与真实文件名均返回 404', oldAdmin.status === 404 && rawAdmin.status === 404);
     const robots = await req('GET', '/robots.txt');
-    check('GET /robots.txt 200、公开站点地图且不泄露后台路径', robots.status === 200 && robots.text.indexOf('Disallow: /admin') !== -1 && robots.text.indexOf('Sitemap: https://chenqiyuan.cn/sitemap.xml') !== -1 && robots.text.indexOf('chenfengadmin') === -1);
+    check('GET /robots.txt 200、公开站点地图且不泄露后台路径', robots.status === 200 && robots.text.indexOf('Disallow: /admin') !== -1 && robots.text.indexOf('Sitemap: ' + DEFAULTS.seoSiteUrl + '/sitemap.xml') !== -1 && robots.text.indexOf('chenfengadmin') === -1);
     const fav = await req('GET', '/favicon.ico');
     check('传统 favicon.ico 可抓取且返回真实图标', fav.status === 200 && /image\/x-icon/.test(fav.headers.get('content-type') || '') && fav.text.length > 100);
     const brandFav = await req('GET', '/favicon.svg');
@@ -179,7 +181,7 @@ async function main() {
     const dailyLatestApi = await req('GET', '/api/daily/latest');
     check('最新日报轻量接口保持独立', dailyLatestApi.status === 200 && Object.prototype.hasOwnProperty.call(dailyLatestApi.json, 'daily') && dailyLatestApi.json.dataRevision);
     const englishHome = await req('GET', '/en/');
-    check('英文首页独立可访问并使用英文 SEO 与语言标记', englishHome.status === 200 && englishHome.text.indexOf('<html lang="en"') !== -1 && englishHome.text.indexOf('Daily AI News') !== -1 && englishHome.text.indexOf('https://chenqiyuan.cn/en/') !== -1);
+    check('英文首页独立可访问并使用英文 SEO 与语言标记', englishHome.status === 200 && englishHome.text.indexOf('<html lang="en"') !== -1 && englishHome.text.indexOf(DEFAULTS.seoEnglishTitle) !== -1 && englishHome.text.indexOf(DEFAULTS.seoSiteUrl + '/en/') !== -1);
     check('英文首页描述与关键词反向关联 AI圈报 品牌', englishHome.text.indexOf('AIQB (AI圈报) tracks daily AI news') !== -1 && englishHome.text.indexOf('AIQB,AI圈报,AI news') !== -1);
     check('中英文首页提供双向 hreflang 与 x-default', englishHome.text.indexOf('hreflang="zh-CN"') !== -1 && englishHome.text.indexOf('hreflang="en"') !== -1 && englishHome.text.indexOf('hreflang="x-default"') !== -1);
     const englishHistory = await req('GET', '/api/history?range=all&language=en&page=1&size=20');
@@ -193,7 +195,7 @@ async function main() {
     check('情报详情页展示完整摘要、分类导航、元信息和相关推荐', article.status === 200 && article.text.indexOf('<article class="card article-card">') !== -1 && article.text.indexOf('内容摘要') !== -1 && article.text.indexOf('class="category-nav"') !== -1 && article.text.indexOf('class="info-grid"') !== -1 && article.text.indexOf('相关推荐') !== -1 && article.text.indexOf('data-share') !== -1);
     check('文章分享成功后会上报独立分享事件', article.text.indexOf('kind:"share"') !== -1 && article.text.indexOf('then(reportShare)') !== -1);
     check('情报详情页含 canonical 与增强 Article 结构化数据', article.text.indexOf('rel="canonical"') !== -1 && article.text.indexOf('"@type":"Article"') !== -1 && article.text.indexOf('"isAccessibleForFree":true') !== -1 && article.text.indexOf('"wordCount":') !== -1);
-    check('文章系统页脚同步展示版权备案信息', article.text.indexOf('2025–2026 Copyright © AI圈报') !== -1 && article.text.indexOf('粤ICP备2025432484号') !== -1);
+    check('文章系统页脚同步展示版权备案信息', article.text.indexOf(DEFAULTS.footerCopyrightText) !== -1 && article.text.indexOf(DEFAULTS.footerIcpNumber) !== -1);
     check('文章系统页脚同步展示项目来源署名', article.text.indexOf('设计与开发由') !== -1 && article.text.indexOf('href="https://github.com/chenfengyimei/AIQB"') !== -1);
     const articles = await req('GET', '/articles');
     check('文章归档页汇总六分类并列出完整文章入口', articles.status === 200 && articles.text.indexOf('AI 情报文章归档') !== -1 && articles.text.indexOf('全部文章') !== -1 && articles.text.indexOf('/category/tutorial') !== -1 && articles.text.indexOf('/category/tip') !== -1 && articles.text.indexOf('/article/intel-') !== -1 && articles.text.indexOf('CollectionPage') !== -1);
@@ -455,7 +457,7 @@ async function main() {
     const settings = await req('GET', '/api/admin/settings', { headers: { 'Cookie': cookie3 } });
     check('GET settings 200 含 env', settings.status === 200 && !!(settings.json.env && settings.json.env.dataDir));
     const siteDefault = await req('GET', '/api/site-settings');
-    check('自定义 Header 默认关闭且公开页脚设置完整', siteDefault.status === 200 && siteDefault.json.enabled === false && siteDefault.json.footer.enabled === true && siteDefault.json.footer.icpNumber === '粤ICP备2025432484号');
+    check('自定义 Header 默认关闭且公开页脚设置完整', siteDefault.status === 200 && siteDefault.json.enabled === false && siteDefault.json.footer.enabled === true && siteDefault.json.footer.icpNumber === DEFAULTS.footerIcpNumber);
     check('公开设置包含品牌、图标、展示、健康球与首页数量分组', siteDefault.json.branding && siteDefault.json.branding.alias === 'AIQB' && siteDefault.json.appearance.defaultTheme === 'light' && siteDefault.json.health.enabled === true && siteDefault.json.health.refreshMinutes === 10 && siteDefault.json.content.homeLatestCount === 10);
     const badBrandAsset = await req('POST', '/api/admin/settings', { headers: H3, body: JSON.stringify({ siteLogoUrl: 'javascript:alert(1)' }) });
     check('品牌图标阻止危险协议', badBrandAsset.status === 400);
@@ -590,7 +592,10 @@ async function main() {
   } finally {
     child.kill();
     await sleep(300);
-    try { if (process.platform === 'win32') child.kill('taskkill', ['/pid', String(child.pid), '/F', '/T']); } catch (e) {}
+    // Windows 上 Node 的 kill() 已会终止子进程；此前的 child.kill('taskkill', [...]) 传参方式不被支持
+    if (process.platform === 'win32' && !child.killed) {
+      try { child.kill('SIGKILL'); } catch (e) {}
+    }
   }
 
   console.log('\n================ 结果汇总 ================');
