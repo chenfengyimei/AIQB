@@ -50,6 +50,14 @@ function classifyCategory(item, category) {
 }
 
 function nowIso() { return new Date().toISOString(); }
+// 本地日期键：与 stats.js 的 dayKeyOf 同口径。日界类统计（今日新增/趋势）必须
+// 用本地日，否则 UTC+8 环境 00:00–08:00 的记录会被算进"昨天"。
+function localDayKey(value) {
+  const t = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(t.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return t.getFullYear() + '-' + p(t.getMonth() + 1) + '-' + p(t.getDate());
+}
 function hash(value, size) {
   return crypto.createHash('sha256').update(String(value), 'utf8').digest('hex').slice(0, size || 24);
 }
@@ -566,15 +574,15 @@ class IntelligenceStore {
   }
 
   stats() {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDayKey(new Date());
     const result = { total: this.items.length, active: 0, published: 0, draft: 0, archived: 0, deleted: 0, manual: 0, newToday: 0, updatedToday: 0, uniqueSources: 0, categories: {}, storageBytes: 0, duplicatesPrevented: this.metrics.duplicatesPrevented || 0 };
     const sources = new Set();
     for (const item of this.items) {
       result[item.status] = (result[item.status] || 0) + 1;
       if (item.status !== 'deleted') result.active++;
       if (item.sourceKind === 'manual') result.manual++;
-      if (String(item.createdAt || '').slice(0, 10) === today) result.newToday++;
-      if (String(item.updatedAt || '').slice(0, 10) === today) result.updatedToday++;
+      if (localDayKey(item.createdAt) === today) result.newToday++;
+      if (localDayKey(item.updatedAt) === today) result.updatedToday++;
       const shown = publicItem(item);
       const src = sourceName(shown);
       if (src) sources.add(src);
@@ -864,7 +872,7 @@ class IntelligenceStore {
     const limit = Math.min(Math.max(1, Number(days) || 30), 366);
     const byDay = {};
     for (const run of (this.metrics.runs || [])) {
-      const day = String(run.at || '').slice(0, 10);
+      const day = localDayKey(run.at);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
       if (!byDay[day]) byDay[day] = { date: day, added: 0, updated: 0, duplicates: 0, invalid: 0, total: 0, runs: 0 };
       byDay[day].added += Number(run.added) || 0;
@@ -886,4 +894,4 @@ class IntelligenceStore {
   }
 }
 
-module.exports = { IntelligenceStore, fingerprint, identityAliases, cleanItem, tutorialScore, classifyCategory, isEnglishItem };
+module.exports = { IntelligenceStore, localDayKey, fingerprint, identityAliases, cleanItem, tutorialScore, classifyCategory, isEnglishItem };

@@ -82,6 +82,17 @@ function check(name, condition) { console.log((condition ? 'PASS ' : 'FAIL ') + 
       const flushedSummary = await failing.summary(7);
       check('写入恢复后队列数据完整落库', failing.queue.length === 0 && flushedSummary.today.scopes.frontend.pv === 1);
       check('流式事件迭代器可用', Array.from(db.iterateEventsSince('1970-01-01')).length === 1);
+
+      // 未来幻影日：存储保留但不得污染聚合视图
+      const futureDate = new Date(failing.todayKey + 'T12:00:00');
+      futureDate.setDate(futureDate.getDate() + 1);
+      const p2 = (n) => String(n).padStart(2, '0');
+      const futureKey = futureDate.getFullYear() + '-' + p2(futureDate.getMonth() + 1) + '-' + p2(futureDate.getDate());
+      db.appendEvents([{ t: new Date().toISOString(), ip: 'phantom-ip', uv: 'phantom-uv', p: '/', s: 200, k: 'frontend', _d: futureKey }]);
+      const guarded = await failing.summary(7);
+      check('未来幻影日保留在存储但不进入聚合视图',
+        !!failing.days[futureKey] && guarded.totals.hits === 1 && guarded.currentMonth.pv === 1 &&
+        !guarded.days.some((row) => row.date === futureKey) && failing.quickToday().totals.pv === 1);
       await failing.shutdown();
       db.close();
     } finally {

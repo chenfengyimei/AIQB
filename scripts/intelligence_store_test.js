@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { Store } = require('../server/lib/store');
-const { IntelligenceStore } = require('../server/lib/intelligence-store');
+const { IntelligenceStore, localDayKey } = require('../server/lib/intelligence-store');
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiqb-intel-test-'));
 let pass = 0, fail = 0;
@@ -124,6 +124,23 @@ try {
   const reloaded = new IntelligenceStore(dir);
   reloaded.init();
   check('情报编辑和回收站状态可跨重启持久化', reloaded.get(id).title === '人工标题' && reloaded.get(id).status === 'deleted');
+
+  // 日界统计必须用本地日：本地零点后（含 00:00–08:00 窗口）的记录属于"今天"
+  const earlyLocal = new Date();
+  earlyLocal.setHours(0, 30, 0, 0);
+  check('localDayKey 返回本地日历日期', localDayKey(earlyLocal) === earlyLocal.toLocaleDateString('sv-SE') && localDayKey('not-a-date') === '');
+  const tzDir = path.join(dir, 'timezone-case');
+  const tzStore = new IntelligenceStore(tzDir);
+  tzStore.init();
+  tzStore.metrics.runs = [{ at: earlyLocal.toISOString(), added: 2, updated: 1, duplicatesPrevented: 0, invalid: 0, totalAfter: 3 }];
+  const tzTrend = tzStore.trend(1);
+  check('采集趋势按本地日分桶（本地零点后的运行计入今天）', tzTrend.length === 1 && tzTrend[0].date === earlyLocal.toLocaleDateString('sv-SE') && tzTrend[0].runs === 1 && tzTrend[0].added === 2);
+  tzStore.ingestItems([{ id: 'tz-item', title: '本地零点后入库的情报', source: { name: '测试源' }, links: { original: 'https://example.com/tz-item' }, category: 'industry', publishedAt: earlyLocal.toISOString() }], { trigger: 'tz-test' });
+  const tzRecord = tzStore.byId.get(tzStore.list({ status: 'active' }).items[0].id);
+  tzRecord.createdAt = earlyLocal.toISOString();
+  tzRecord.updatedAt = earlyLocal.toISOString();
+  const tzStats = tzStore.stats();
+  check('今日新增与今日更新按本地日界统计', tzStats.newToday === 1 && tzStats.updatedToday === 1);
 } finally {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {}
 }

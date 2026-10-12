@@ -323,7 +323,16 @@ class Stats {
     }
     return totals;
   }
-  quickToday() { this._syncDaysFromDb(this.todayKey); const today = Object.assign({ date: this.todayKey }, normalizeDay(this.days[this.todayKey])); const all = Object.keys(this.days).sort().map((key) => normalizeDay(this.days[key])); return { today, totals: this._aggregate(all), retention: 'forever' }; }
+  // 聚合视图只统计「今天及以前」的合法日期键：时钟回拨或异常 _d 造成的
+  // 未来日（幻影日）不得永久污染月度与总量。
+  _visibleDayKeys() {
+    const keys = [];
+    for (const key of Object.keys(this.days)) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(key) && key <= this.todayKey) keys.push(key);
+    }
+    return keys.sort();
+  }
+  quickToday() { this._syncDaysFromDb(this.todayKey); const today = Object.assign({ date: this.todayKey }, normalizeDay(this.days[this.todayKey])); const all = this._visibleDayKeys().map((key) => normalizeDay(this.days[key])); return { today, totals: this._aggregate(all), retention: 'forever' }; }
 
   async summary(daysValue) {
     const requested = Math.round(Number(daysValue) || 30);
@@ -332,7 +341,7 @@ class Stats {
     const dayKeys = []; const now = new Date();
     for (let i = n - 1; i >= 0; i--) dayKeys.push(dayKeyOf(new Date(now.getTime() - i * 86400000)));
     const series = dayKeys.map((key) => Object.assign({ date: key }, normalizeDay(this.days[key])));
-    const allKeys = Object.keys(this.days).sort();
+    const allKeys = this._visibleDayKeys();
     const allDays = allKeys.map((key) => normalizeDay(this.days[key]));
     const months = {};
     for (const key of allKeys) {
