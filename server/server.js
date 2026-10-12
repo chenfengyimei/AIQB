@@ -29,6 +29,7 @@ const { Stats } = require('./lib/stats');
 const { Auth, AuthError, COOKIE_NAME } = require('./lib/auth');
 const { StateDatabase } = require('./lib/state-db');
 const { UpdateManager } = require('./lib/update-manager');
+const { BackupScheduler } = require('./lib/backup');
 const SEO = require('./lib/seo');
 const U = require('./lib/http-util');
 
@@ -79,6 +80,7 @@ let stats;
 let auth;
 let stateDb;
 let updateManager;
+let backupScheduler = null;
 let apiCache = null;          // /api/data 预序列化响应 {jsonBuf, gzipBuf, etag}
 let publicData = null;        // 已应用后台编辑、归档与删除规则的公开数据
 let collectTimer = null;
@@ -1060,6 +1062,7 @@ function adminOverviewPayload() {
     friendLinks: friendLinks.summary(),
     email: emailManager.overview().summary,
     stats: q,
+    backup: backupScheduler ? backupScheduler.status() : null,
     collect: {
       intervalHours: config.collectIntervalHours,
       nextCollectAt: nextCollectAt ? new Date(nextCollectAt).toISOString() : null,
@@ -1937,6 +1940,7 @@ async function shutdown(signal) {
   if (collectTimer) clearTimeout(collectTimer);
   if (collectorHeartbeatTimer) clearInterval(collectorHeartbeatTimer);
   if (collectLeaseTimer) clearInterval(collectLeaseTimer);
+  if (backupScheduler) backupScheduler.shutdown();
   if (!DISABLE_COLLECT && stateDb) {
     collectBusy = false;
     nextCollectAt = 0;
@@ -1987,6 +1991,16 @@ async function main() {
   auth = new Auth(DATA_DIR, config, stateDb);
   auth.init();
   updateManager = new UpdateManager({ dataDir: DATA_DIR, appDir: path.join(__dirname, '..'), version: VERSION });
+  // 每日运行数据定时备份：所有实例都参与调度，跨实例锁保证同一时刻只有一个执行，停机错过触发点由补跑兜底
+  backupScheduler = new BackupScheduler({
+    dataDir: DATA_DIR,
+    stateDb,
+    logger: logCollect,
+    atSpec: process.env.AIQB_BACKUP_AT,
+    keep: process.env.AIQB_BACKUP_KEEP,
+    includeFull: process.env.AIQB_BACKUP_FULL === '1',
+  });
+  backupScheduler.start();
 
   const latest = store.getLatest();
   if (latest && intelligence.stats().total === 0) {

@@ -1,22 +1,8 @@
+#!/usr/bin/env node
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
-const Database = require('better-sqlite3');
-
-async function backupDatabase(dataDir, outputDir) {
-  const source = path.join(path.resolve(dataDir), 'db', 'aiqb.sqlite');
-  if (!fs.existsSync(source)) return { skipped: true, reason: 'database_missing' };
-  const targetDir = path.resolve(outputDir);
-  fs.mkdirSync(targetDir, { recursive: true });
-  const target = path.join(targetDir, 'aiqb.sqlite.consistent-backup');
-  try { fs.rmSync(target, { force: true }); } catch (_) {}
-  const db = new Database(source, { readonly: true, fileMustExist: true });
-  try { await db.backup(target); }
-  finally { db.close(); }
-  const stat = fs.statSync(target);
-  return { skipped: false, source, target, bytes: stat.size };
-}
+// 手动一次性备份 CLI（一致性备份逻辑在 server/lib/backup.js，与内置定时备份共用）
+const { backupDatabase } = require('../server/lib/backup');
 
 function option(name) {
   const index = process.argv.indexOf(name);

@@ -8,7 +8,7 @@ const http = require('http');
 const crypto = require('crypto');
 const { UpdateManager, compareVersions, decodeManifest, sourcesFromEnv, sourceForRevision, normalizeRevision, validateUpdateConfirmation } = require('../server/lib/update-manager');
 const { canonicalPayload, keyIdFor } = require('../server/lib/release-signature');
-const { assertDataDirectoryIsolation, updateHealthUrl, waitForHealthyVersion, rollbackInstallation } = require('./online_update');
+const { assertDataDirectoryIsolation, updateHealthUrl, waitForHealthyVersion, rollbackInstallation, pruneOnlineBackups } = require('./online_update');
 
 async function main() {
   let pass = 0;
@@ -154,6 +154,16 @@ async function main() {
       else process.env.AIQB_UPDATE_HEALTH_URL = previousHealthUrl;
       await new Promise((resolve) => health.close(resolve));
     }
+    check('在线更新备份目录只保留最新 N 份', () => {
+      const parent = path.join(temp, 'app-backups');
+      for (let i = 1; i <= 7; i++) fs.mkdirSync(path.join(parent, 'online-2026-01-0' + i + 'T00-00-00-000Z'), { recursive: true });
+      const pruned = pruneOnlineBackups(parent, 5);
+      const left = fs.readdirSync(parent).sort();
+      assert.strictEqual(pruned.removed, 2);
+      assert.strictEqual(left.length, 5);
+      assert.strictEqual(left[0], 'online-2026-01-03T00-00-00-000Z');
+      assert.strictEqual(left[left.length - 1], 'online-2026-01-07T00-00-00-000Z');
+    });
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }

@@ -144,6 +144,20 @@ function reloadServices(appDir) {
   try { run('pm2', ['save'], { cwd: appDir }); } catch (_) {}
 }
 
+// 在线更新历史备份保留上限：每次更新全量打包代码+数据库+运行数据，不清理会无限增长。
+function pruneOnlineBackups(parentDir, keep) {
+  const limit = Math.min(100, Math.max(1, Math.round(Number(keep)) || 5));
+  let entries = [];
+  try { entries = fs.readdirSync(parentDir).filter((name) => /^online-/.test(name)).sort(); }
+  catch (error) { return { removed: 0, kept: 0, limit }; }
+  let removed = 0;
+  while (entries.length > limit) {
+    const doomed = entries.shift();
+    try { fs.rmSync(path.join(parentDir, doomed), { recursive: true, force: true }); removed++; } catch (error) {}
+  }
+  return { removed, kept: entries.length, limit };
+}
+
 function stopServices(appDir) {
   const errors = [];
   for (const name of ['aiqb-web', 'aiqb-collector']) {
@@ -269,6 +283,7 @@ async function main() {
 
     setState('backing_up', '签名与逐文件校验通过，正在备份代码、数据库和完整运行数据', { archiveBytes: bytes, archiveSha256: sha256(archive), packageFiles: signedPackage.files, packageBytes: signedPackage.bytes, signatureKeyId: signedPackage.keyId, extractedFiles: packageTree.files, backupDir });
     fs.mkdirSync(backupDir, { recursive: true, mode: 0o750 });
+    pruneOnlineBackups(path.dirname(backupDir), process.env.AIQB_UPDATE_BACKUP_KEEP);
     const codeBackup = path.join(backupDir, 'code');
     for (const relative of COPY_TARGETS) {
       const existed = fs.existsSync(path.join(appDir, relative));
@@ -322,4 +337,4 @@ if (require.main === module) main().catch((error) => {
   process.exitCode = 1;
 });
 
-module.exports = { COPY_TARGETS, assertSafeDirectory, assertDataDirectoryIsolation, validateArchiveListing, inspectArchive, assertSafePackageTree, updateHealthUrl, waitForHealthyVersion, rollbackInstallation };
+module.exports = { COPY_TARGETS, assertSafeDirectory, assertDataDirectoryIsolation, validateArchiveListing, inspectArchive, assertSafePackageTree, updateHealthUrl, waitForHealthyVersion, rollbackInstallation, pruneOnlineBackups };
