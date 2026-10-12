@@ -2,7 +2,7 @@
 
 const root = __dirname;
 const dataDir = process.env.AIQB_DATA_DIR || root + '/server/data';
-const webPort = Number(process.env.AIQB_PORT || 3001);
+const webPort = Number(process.env.AIQB_PORT || 3000);
 const collectorPort = Number(process.env.AIQB_COLLECTOR_PORT || (webPort + 1));
 const common = {
   cwd: root,

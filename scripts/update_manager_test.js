@@ -164,6 +164,36 @@ async function main() {
       assert.strictEqual(left[0], 'online-2026-01-03T00-00-00-000Z');
       assert.strictEqual(left[left.length - 1], 'online-2026-01-07T00-00-00-000Z');
     });
+
+    check('长阶段状态超时但锁仍新鲜时不误判中断', () => {
+      const dir = path.join(temp, 'watchdog-alive');
+      fs.mkdirSync(path.join(dir, 'updates'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'updates', 'running.lock'), 'owner');
+      fs.writeFileSync(path.join(dir, 'updates', 'state.json'), JSON.stringify({
+        phase: 'installing', message: '安装中',
+        startedAt: new Date(Date.now() - 40 * 60 * 1000).toISOString(),
+        updatedAt: new Date(Date.now() - 40 * 60 * 1000).toISOString(),
+      }));
+      const alive = new UpdateManager({ dataDir: dir, appDir: path.join(__dirname, '..'), version: '2.25.0' }).status();
+      assert.strictEqual(alive.phase, 'installing');
+      assert.ok(fs.existsSync(path.join(dir, 'updates', 'running.lock')));
+    });
+
+    check('锁心跳停止超 30 分钟才判中断并清锁', () => {
+      const dir = path.join(temp, 'watchdog-stale');
+      fs.mkdirSync(path.join(dir, 'updates'), { recursive: true });
+      const lock = path.join(dir, 'updates', 'running.lock');
+      fs.writeFileSync(lock, 'owner');
+      const old = new Date(Date.now() - 45 * 60 * 1000);
+      fs.utimesSync(lock, old, old);
+      fs.writeFileSync(path.join(dir, 'updates', 'state.json'), JSON.stringify({
+        phase: 'installing', message: '安装中',
+        startedAt: old.toISOString(), updatedAt: old.toISOString(),
+      }));
+      const failed = new UpdateManager({ dataDir: dir, appDir: path.join(__dirname, '..'), version: '2.25.0' }).status();
+      assert.strictEqual(failed.phase, 'failed');
+      assert.ok(!fs.existsSync(lock));
+    });
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }

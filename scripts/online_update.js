@@ -203,7 +203,7 @@ async function rollbackInstallation(options, operations) {
 }
 
 function updateHealthUrl() {
-  const port = Number(process.env.AIQB_PORT || process.env.PORT || 3001);
+  const port = Number(process.env.AIQB_PORT || process.env.PORT || 3000);
   const raw = String(process.env.AIQB_UPDATE_HEALTH_URL || ('http://127.0.0.1:' + port + '/health/live')).trim();
   let url;
   try { url = new URL(raw); } catch (_) { throw new Error('AIQB_UPDATE_HEALTH_URL 格式无效'); }
@@ -263,6 +263,11 @@ async function main() {
   const backupDir = path.join(path.dirname(appDir), path.basename(appDir) + '-backups', 'online-' + new Date().toISOString().replace(/[:.]/g, '-'));
   const previous = [];
   let copied = false;
+  // 锁存活心跳：父进程 status() 看门狗以锁 mtime 判中断，慢网络 npm ci 等长阶段期间保持锁新鲜。
+  const lockTouchTimer = setInterval(() => {
+    try { fs.utimesSync(lockFile, new Date(), new Date()); } catch (error) {}
+  }, 5 * 60 * 1000);
+  lockTouchTimer.unref();
   try {
     setState('downloading', '正在从 ' + source.name + ' 下载 v' + expectedVersion + '（提交 ' + expectedRevision.slice(0, 12) + '）');
     fs.mkdirSync(extractDir, { recursive: true });
@@ -314,6 +319,7 @@ async function main() {
     setState('failed', '更新失败：' + error.message + (copied ? (rollbackError || '；旧代码已恢复') : ''), { failedAt: new Date().toISOString(), rollbackError: rollbackError || null });
     process.exitCode = 1;
   } finally {
+    clearInterval(lockTouchTimer);
     try { fs.unlinkSync(lockFile); } catch (_) {}
     try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
   }

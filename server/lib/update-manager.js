@@ -205,8 +205,14 @@ class UpdateManager {
   status() {
     const state = readJson(this.stateFile, { phase: 'idle', message: '尚未执行在线更新' });
     if (state.phase === 'queued' || state.phase === 'downloading' || state.phase === 'backing_up' || state.phase === 'installing' || state.phase === 'restarting') {
-      const updated = new Date(state.updatedAt || state.startedAt || 0).getTime();
-      if (updated && Date.now() - updated > 30 * 60 * 1000) {
+      // 以锁文件 mtime 为存活心跳（更新子进程周期性 touch 锁）：状态长时间不更新
+      // 只说明某阶段耗时（如慢网络 npm ci），不代表进程已死；只有锁也停止活动才判定中断。
+      // 锁已消失且状态仍卡在运行态时，按状态时间兜底判失败。
+      let lockAgeMs = null;
+      try { lockAgeMs = Date.now() - fs.statSync(this.lockFile).mtimeMs; } catch (error) {}
+      const stateAgeMs = Date.now() - new Date(state.updatedAt || state.startedAt || 0).getTime();
+      const stale = lockAgeMs == null ? stateAgeMs > 30 * 60 * 1000 : lockAgeMs > 30 * 60 * 1000;
+      if (stale) {
         try { fs.unlinkSync(this.lockFile); } catch (_) {}
         state.phase = 'failed';
         state.message = '更新进程已中断，请检查服务器日志后重试';
@@ -330,6 +336,17 @@ class UpdateManager {
         env: process.env,
         detached: true,
         stdio: 'ignore',
+      });
+      // spawn 失败以 'error' 事件异步到达；不监听会升级为服务器进程 uncaughtException。
+      child.on('error', (error) => {
+        try { fs.unlinkSync(this.lockFile); } catch (_) {}
+        try {
+          atomicJson(this.stateFile, Object.assign(state, {
+            phase: 'failed',
+            message: '无法启动更新进程：' + (error && error.message || error),
+            updatedAt: new Date().toISOString(),
+          }));
+        } catch (_) {}
       });
       child.unref();
       return { accepted: true, pid: child.pid, status: state };
