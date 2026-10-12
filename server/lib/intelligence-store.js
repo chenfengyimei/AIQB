@@ -419,7 +419,7 @@ class IntelligenceStore {
     return { batch, received, invalid, repeatedInBatch };
   }
 
-  _ingest(refs, meta, at) {
+  _ingest(refs, meta, at, opts) {
     const { batch, received, invalid, repeatedInBatch } = this._buildBatch(refs, meta);
     const defaultIncomingKind = text(meta && meta.sourceKind, 30) || 'collected';
 
@@ -485,7 +485,7 @@ class IntelligenceStore {
     this.metrics.invalid = (this.metrics.invalid || 0) + invalid;
     this.metrics.duplicatesPrevented = (this.metrics.duplicatesPrevented || 0) + result.duplicatesPrevented;
     this.metrics.runs = (this.metrics.runs || []).concat(result).slice(-1000);
-    this._persist();
+    if (!opts || opts.persist !== false) this._persist();
     return result;
   }
 
@@ -495,14 +495,19 @@ class IntelligenceStore {
   }
 
   // 精选全量同步专用：扁平条目入库，不带窗口语义
-  ingestItems(items, meta) {
+  // opts.persist=false 时仅更新内存，由调用方在批次边界统一 persistNow()——
+  // 分页同步每页全库重写会产生 O(页数×全库) 写放大。
+  ingestItems(items, meta, opts) {
     const at = text(meta && meta.at, 80) || nowIso();
     const rows = Array.isArray(items) ? items : [];
-    return this._ingest(rows.map((item) => ({ item, window: null })), meta, at);
+    return this._ingest(rows.map((item) => ({ item, window: null })), meta, at, opts);
   }
 
+  // 批量入库的统一落盘点：与 opts.persist=false 配对使用
+  persistNow() { this._persist(); }
+
   // 精选增量同步的 remove 操作：把对应条目归档（保留数据、可恢复）；人工条目与回收站/已归档状态不覆盖
-  archiveByRemoteIds(remoteIds, at) {
+  archiveByRemoteIds(remoteIds, at, opts) {
     const stamp = text(at, 80) || nowIso();
     const result = { archived: 0, missing: 0, skipped: 0, ids: [] };
     for (const remoteId of (Array.isArray(remoteIds) ? remoteIds : [])) {
@@ -522,7 +527,7 @@ class IntelligenceStore {
       result.archived++;
       result.ids.push(record.id);
     }
-    if (result.archived) this._persist();
+    if (result.archived && (!opts || opts.persist !== false)) this._persist();
     return result;
   }
 

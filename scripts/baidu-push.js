@@ -145,14 +145,17 @@ function loadState() {
 
 function saveState(submitted) {
   const dir = path.dirname(STATE_FILE_PATH);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true });
   const data = {
     site: 'chenqiyuan.cn',
     note: '百度普通收录提交状态 - 不含 Token',
     lastRun: new Date().toISOString(),
     submitted: submitted,
   };
-  fs.writeFileSync(STATE_FILE_PATH, JSON.stringify(data, null, 2), 'utf8');
+  // tmp+rename 原子写：进程中断留下的半截 JSON 会让 loadState 抛错，当天提交全部放弃
+  const tmp = STATE_FILE_PATH + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
+  fs.renameSync(tmp, STATE_FILE_PATH);
 }
 
 function isAlreadySubmitted(url, submittedList) {
@@ -165,6 +168,22 @@ function getTodaySuccessCount(submittedList) {
 }
 
 // ==================== 文章预检 ====================
+// 限制预检读取体量：noindex 判断只需要 <head>，异常大页面不应占满内存
+async function readLimitedBody(res, maxBytes) {
+  if (!res.body || typeof res.body.getReader !== 'function') return res.text();
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const next = await reader.read();
+    if (next.done) break;
+    total += next.value.length;
+    chunks.push(Buffer.from(next.value));
+    if (total > maxBytes) { try { await reader.cancel(); } catch (e) {} break; }
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 async function preCheckArticle(url) {
   try {
     const res = await fetchWithTimeout(url, { redirect: 'manual' });
@@ -177,7 +196,7 @@ async function preCheckArticle(url) {
     if (res.status !== 200) {
       return { ok: false, reason: 'HTTP ' + res.status };
     }
-    const html = await res.text();
+    const html = await readLimitedBody(res, 256 * 1024);
 
     // noindex 检查
     const robotsMatch = html.match(/<meta[^>]+name=["']robots["'][^>]*content=["']([^"']*)["']/i);

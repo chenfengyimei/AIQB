@@ -65,7 +65,8 @@ async function fetchJSON(url, opts) {
       if (attempt >= retries || !retryable(error)) break;
       const jitter = Math.floor(Math.random() * 350);
       const retryAfter = Number(error && error.apiMeta && error.apiMeta.retryAfterSec) || 0;
-      await sleep(Math.max(RETRY_DELAY_MS * Math.pow(2, attempt) + jitter, retryAfter * 1000));
+      // Retry-After 只信任到上限：恶意/异常上游返回 86400 会把整个采集循环挂死一天。
+      await sleep(Math.max(RETRY_DELAY_MS * Math.pow(2, attempt) + jitter, Math.min(retryAfter, 300) * 1000));
     }
   }
   throw lastErr;

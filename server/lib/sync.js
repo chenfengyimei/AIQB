@@ -102,7 +102,8 @@ class SelectedSync {
       if (!pageCursor) throw new Error('精选快照缺少同步 cursor');
       if (cursor === null) cursor = pageCursor;
       else if (pageCursor !== cursor) throw new Error('精选快照分页 cursor 不一致，已中止（下次采集将重新引导）');
-      const verification = this.intelligence.ingestItems(payload.items, ingestMeta);
+      // 攒批入库：先只更新内存，全部页成功后统一落盘，避免每页全库重写造成 O(页数×全库) 写放大
+      const verification = this.intelligence.ingestItems(payload.items, ingestMeta, { persist: false });
       pages++;
       items += payload.items.length;
       added += verification.added;
@@ -112,7 +113,9 @@ class SelectedSync {
       pageToken = String(payload.nextPage);
       await sleep(PAGE_DELAY_MS);
     }
-    if (pages >= MAX_PAGES) throw new Error('精选快照分页超过安全上限 ' + MAX_PAGES + ' 页，已中止');
+    if (pages >= MAX_PAGES) throw new Error('精选快照分页超过安全上限 ' + MAX_PAGES + ' 页，已中止（本批未入库，下次重新引导）');
+    // 数据先落盘、cursor 后保存：中途崩溃时引导整体重来，重放幂等
+    this.intelligence.persistNow();
     this.state.cursor = cursor;
     this.state.cursorAt = at;
     this.state.bootstrap = { at, pages, items };
@@ -123,11 +126,13 @@ class SelectedSync {
     return summary;
   }
 
-  // 增量循环：应用一页后立即保存返回的 cursor；409 表示 cursor 已不可续，需要重新引导
+  // 增量循环：按批次提交（每 10 页与最后一页），数据与 cursor 同批落盘；409 表示 cursor 已不可续，需要重新引导
   async _applyChanges(trigger) {
     const started = Date.now();
     let cursor = this.state.cursor;
     let pages = 0, upserts = 0, removes = 0, bytes = 0, added = 0, updated = 0, archived = 0;
+    const baseUpserts = this.state.totals.upserts || 0;
+    const baseRemoves = this.state.totals.removes || 0;
     while (pages < MAX_PAGES) {
       const template = this._endpointUrl('selectedChanges', API + '/selected/changes?limit=' + CHANGES_LIMIT + '&cursor={cursor}');
       const url = template.includes('{cursor}')
@@ -156,25 +161,29 @@ class SelectedSync {
           sourceKind: 'sync',
           defaultSelected: true,
           at: new Date().toISOString(),
-        });
+        }, { persist: false });
         added += verification.added;
         updated += verification.updated;
       }
       if (removeIds.length) {
-        const result = this.intelligence.archiveByRemoteIds(removeIds, new Date().toISOString());
+        const result = this.intelligence.archiveByRemoteIds(removeIds, new Date().toISOString(), { persist: false });
         archived += result.archived;
       }
       pages++;
       cursor = text(payload.cursor, 2000) || cursor;
-      this.state.cursor = cursor;
-      this._persist();
+      // 每 10 页或最后一页为一个提交批次：情报数据、cursor 与 totals 同批落盘。
+      // cursor 不得领先于已持久化数据——中途崩溃时从上批 cursor 重放，幂等安全。
+      if (pages % 10 === 0 || !payload.hasMore) {
+        this.intelligence.persistNow();
+        this.state.cursor = cursor;
+        this.state.totals.upserts = baseUpserts + upserts;
+        this.state.totals.removes = baseRemoves + removes;
+        this._persist();
+      }
       if (!payload.hasMore) break;
       await sleep(PAGE_DELAY_MS);
     }
-    if (pages >= MAX_PAGES) throw new Error('精选增量分页超过安全上限 ' + MAX_PAGES + ' 页，已中止');
-    this.state.totals.upserts += upserts;
-    this.state.totals.removes += removes;
-    this._persist();
+    if (pages >= MAX_PAGES) throw new Error('精选增量分页超过安全上限 ' + MAX_PAGES + ' 页，已中止（最近一批共 ' + (pages % 10 || 10) + ' 页未提交，cursor 停在上批，下轮从断点续跑）');
     return { rebootstrap: false, pages, upserts, removes, added, updated, archived, durationMs: Date.now() - started };
   }
 

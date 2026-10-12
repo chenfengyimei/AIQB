@@ -114,6 +114,23 @@ async function main() {
   check('人工条目不被 remove 归档', intelligence.get(manual.id).status === 'published');
   check('增量累计写入 totals', sync.state.totals.upserts === 2 && sync.state.totals.removes === 2);
 
+  console.log('\n[2.5] 写放大收敛：多页增量只按批次落盘');
+  let persistCalls = 0;
+  const originalPersist = intelligence._persist.bind(intelligence);
+  intelligence._persist = () => { persistCalls++; return originalPersist(); };
+  const pageOfChanges = (i) => ({
+    schemaVersion: 1, fields: 'default', cursor: 'CUR-B', count: 2, hasMore: i < 23, nextPage: 'P-' + (i + 1), changes: [
+      { op: 'upsert', changedAt: '2026-08-29T05:00:00Z', item: item('it-bulk-' + i, '批次条目 ' + i) },
+      { op: 'upsert', changedAt: '2026-08-29T05:00:00Z', item: item('it-bulk-b-' + i, '批次条目 B' + i) },
+    ],
+  });
+  queueFetch(sync, Array.from({ length: 24 }, (_, i) => pageOfChanges(i)));
+  const bulk = await sync.run('unit-test');
+  intelligence._persist = originalPersist;
+  check('24 页增量成功且全部入库', bulk.ok === true && bulk.mode === 'changes' && bulk.changes.pages === 24 && bulk.changes.upserts === 48);
+  check('多页同步全库重写次数受批次约束（≤页数/10+2）', persistCalls > 0 && persistCalls <= 24 / 10 + 2);
+  check('批次提交后 totals 与页数一致', sync.state.totals.upserts === 2 + 48 && sync.state.totals.removes === 2 && sync.state.cursor === 'CUR-B');
+
   console.log('\n[3] 409 snapshot_required 自动重新引导');
   queueFetch(sync, [
     { error: true, status: 409 },

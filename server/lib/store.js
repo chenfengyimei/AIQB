@@ -294,6 +294,8 @@ class Store {
 
   // 按天汇总采集量（用于概览图表）
   rollup(days) {
+    // 未传参时默认 14 天：`keys.length > undefined` 恒为 false 会返回全部历史
+    const n = Math.min(Math.max(1, Math.round(Number(days) || 14)), 366);
     const byDay = {}; // 'YYYY-MM-DD' -> {w7,w24,hot,fail}
     const dayKey = (iso) => {
       const d = new Date(iso);
@@ -309,7 +311,7 @@ class Store {
       else d.fail++;
     }
     const keys = Object.keys(byDay).sort();
-    const cut = keys.length > days ? keys.slice(keys.length - days) : keys;
+    const cut = keys.length > n ? keys.slice(keys.length - n) : keys;
     return cut.map((k) => byDay[k]);
   }
 
