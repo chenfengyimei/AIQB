@@ -61,6 +61,36 @@ try {
   try { manager.save(Object.assign({}, saved, { host: '127.0.0.1', password: '' })); } catch (error) { invalidHost = /公开域名/.test(error.message); }
   try { manager.save(Object.assign({}, saved, { recipients: ['bad-address'], password: '' })); } catch (error) { invalidRecipient = /收件人/.test(error.message); }
   check('配置校验阻止 25 端口、IP 主机与无效收件人', invalidPort && invalidHost && invalidRecipient);
+
+  const emailDir = path.join(dir, 'email');
+  fs.writeFileSync(path.join(emailDir, '.key'), 'AAAA'); // 模拟密钥文件损坏（长度≠32）
+  const revived = new EmailManager(dir);
+  revived.init();
+  const revivedSaved = revived.save({
+    enabled: false,
+    host: 'smtp.example.com',
+    port: 465,
+    security: 'tls',
+    username: 'notice@example.com',
+    password: 'new-secret-after-corruption',
+    fromAddress: 'notice@example.com',
+    recipients: 'owner@example.com',
+  });
+  const corruptBackups = fs.readdirSync(emailDir).filter((name) => name.startsWith('.key.corrupt-'));
+  check('密钥损坏时保留现场并显式重建新密钥', corruptBackups.length === 1 && revivedSaved.hasPassword);
+  check('重建后的密钥可正常加解密', revived._decrypt(revived._encrypt('roundtrip-secret')) === 'roundtrip-secret');
+
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'aiqb-email-race-'));
+  try {
+    const first = new EmailManager(dir2);
+    first.init();
+    first._key();
+    const second = new EmailManager(dir2);
+    second.init();
+    check('多实例共享数据目录时密钥收敛一致', second._decrypt(first._encrypt('cross-instance-secret')) === 'cross-instance-secret');
+  } finally {
+    try { fs.rmSync(dir2, { recursive: true, force: true }); } catch (error) {}
+  }
 } finally {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch (error) {}
 }

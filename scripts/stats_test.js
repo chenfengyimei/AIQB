@@ -61,6 +61,34 @@ function check(name, condition) { console.log((condition ? 'PASS ' : 'FAIL ') + 
   const visitText = fs.readFileSync(path.join(dir, 'visits-' + key + '.jsonl'), 'utf8');
   check('新版聚合以 v5 永久日维度格式落盘', saved.version === 5 && saved.retention === 'forever' && saved.uniqueWindow === 'daily' && saved.ipStorage === 'network-segment' && saved.days[key].scopes.frontend && saved.days[key].clicks === 2 && saved.days[key].articlePv === 1 && saved.days[key].articleShares === 1 && saved.days[pastKey].articlePv === 1 && saved.days[pastKey].articleShares === 1);
   check('访问流水保存 IP 网段和地域但不保存完整 IP 明文', visitText.includes('203.0.113.0/24') && visitText.includes('"regionCode":"CN-GD"') && !visitText.includes('203.0.113.42'));
+
+  // 权威库写入失败时队列必须保留，恢复后数据完整落库
+  {
+    const { StateDatabase } = require('../server/lib/state-db');
+    const root2 = fs.mkdtempSync(path.join(os.tmpdir(), 'aiqb-stats-flush-'));
+    try {
+      const db = new StateDatabase(path.join(root2, 'data')).init();
+      const failing = new Stats(root2, db);
+      failing.init();
+      failing.track('203.0.113.7', 'Flush UA', '/flush-test', 200, 'frontend');
+      const originalAppend = db.appendEvents.bind(db);
+      let failMode = true;
+      db.appendEvents = (records) => { if (failMode) throw new Error('模拟 SQLite 写入失败'); return originalAppend(records); };
+      let rejected = false;
+      await failing.flush().catch(() => { rejected = true; });
+      check('权威库写入失败时 flush 报错且队列保留', rejected === true && failing.queue.length === 1);
+      failMode = false;
+      await failing.flush();
+      const flushedSummary = await failing.summary(7);
+      check('写入恢复后队列数据完整落库', failing.queue.length === 0 && flushedSummary.today.scopes.frontend.pv === 1);
+      check('流式事件迭代器可用', Array.from(db.iterateEventsSince('1970-01-01')).length === 1);
+      await failing.shutdown();
+      db.close();
+    } finally {
+      try { fs.rmSync(root2, { recursive: true, force: true }); } catch (e) {}
+    }
+  }
+
   fs.rmSync(root, { recursive:true, force:true });
   console.log('RESULT PASS=' + pass + ' FAIL=' + fail);
   process.exit(fail ? 1 : 0);

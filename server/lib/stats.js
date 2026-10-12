@@ -130,6 +130,7 @@ class Stats {
     this._timer = null;
     this._lastDailyJson = '';
     this._detailCache = null;
+    this._queueOverflowLogged = false;
     this.stateDb = stateDb || null;
   }
 
@@ -159,7 +160,7 @@ class Stats {
       // 历史日聚合直接读取 state_json；仅重放当天流水，避免数据积累多年后启动扫描全库。
       this._syncDaysFromDb(this.todayKey);
     }
-    this._timer = setInterval(() => this.flush().catch(() => {}), FLUSH_MS);
+    this._timer = setInterval(() => this._flushSafe(), FLUSH_MS);
     this._timer.unref();
   }
 
@@ -199,7 +200,7 @@ class Stats {
   _syncDaysFromDb(oldestDay) {
     if (!this.stateDb) return;
     const groups = {};
-    for (const record of this.stateDb.eventsSince(oldestDay || this.todayKey)) {
+    for (const record of this.stateDb.iterateEventsSince(oldestDay || this.todayKey)) {
       const key = record._d || String(record.t || '').slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue;
       (groups[key] ||= []).push(record);
@@ -238,6 +239,20 @@ class Stats {
     return day;
   }
 
+  _pushQueue(record) {
+    if (this.queue.length < 20000) { this.queue.push(record); this._queueOverflowLogged = false; return; }
+    if (!this._queueOverflowLogged) {
+      this._queueOverflowLogged = true;
+      console.error('[stats] 访问事件积压超过内存队列上限，超出部分暂不落盘（内存统计仍计入）');
+    }
+  }
+
+  _flushSafe() {
+    return this.flush().catch((error) => {
+      console.error('[stats] 访问统计落盘失败（队列保留，稍后重试）: ' + (error && error.message || error));
+    });
+  }
+
   track(ip, ua, pathname, status, type, geo) {
     const now = new Date(); const key = dayKeyOf(now); if (key !== this.todayKey) this._rollover(key);
     const hasIp = net.isIP(String(ip || '')) > 0;
@@ -245,9 +260,9 @@ class Stats {
     const uvH = hasIp ? sha16(this.salt + '|' + this.todayKey + '|' + ip + '|' + String(ua || '').slice(0, 120)) : '';
     const record = { t: now.toISOString(), ip: ipH, uv: uvH, seg: hasIp ? ipSegmentOf(ip) : '', g: normalizeGeo(geo), p: String(pathname || '/').slice(0, 160), s: status, k: type || 'other', _d: this.todayKey };
     const day = this.days[this.todayKey] || emptyDay(); this.days[this.todayKey] = this._applyRecord(day, record, this.sets);
-    if (this.queue.length < 20000) this.queue.push(record);
+    this._pushQueue(record);
     this._detailCache = null;
-    if (this.queue.length >= QUEUE_FLUSH_LEN) setImmediate(() => this.flush().catch(() => {}));
+    if (this.queue.length >= QUEUE_FLUSH_LEN) setImmediate(() => this._flushSafe());
   }
 
   trackClick(ip, ua, url, kind, title, geo) {
@@ -258,28 +273,40 @@ class Stats {
     const safeKind = kind === 'friend' ? 'friend' : kind === 'share' ? 'share' : 'item';
     const record = { t: now.toISOString(), ip: ipH, uv: uvH, seg: hasIp ? ipSegmentOf(ip) : '', g: normalizeGeo(geo), p: String(url || '').slice(0, 300), s: 200, k: 'click', ck: safeKind, ct: String(title || '').slice(0, 120), _d: this.todayKey };
     const day = this.days[this.todayKey] || emptyDay(); this.days[this.todayKey] = this._applyRecord(day, record, this.sets);
-    if (this.queue.length < 20000) this.queue.push(record);
+    this._pushQueue(record);
     this._detailCache = null;
-    if (this.queue.length >= QUEUE_FLUSH_LEN) setImmediate(() => this.flush().catch(() => {}));
+    if (this.queue.length >= QUEUE_FLUSH_LEN) setImmediate(() => this._flushSafe());
   }
 
-  _rollover(newKey) { this.flush().catch(() => {}); this.todayKey = newKey; this.sets = newSets(); this.days[newKey] = normalizeDay(this.days[newKey]); }
+  _rollover(newKey) { this._flushSafe(); this.todayKey = newKey; this.sets = newSets(); this.days[newKey] = normalizeDay(this.days[newKey]); }
   async flush() {
     if (this.flushing) return; this.flushing = true;
     try {
       if (this.queue.length) {
         const pending = this.queue.slice();
         const byFile = {};
-        for (const r of this.queue) { const d = r._d || dayKeyOf(new Date(r.t)); const clean = { t:r.t, ip:r.ip, uv:r.uv, seg:r.seg || '', g:normalizeGeo(r.g), p:r.p, s:r.s, k:r.k }; if (r.k === 'click') { clean.ck=r.ck; clean.ct=r.ct; } (byFile[d] = byFile[d] || []).push(JSON.stringify(clean)); }
-        this.queue = [];
+        for (const r of pending) { const d = r._d || dayKeyOf(new Date(r.t)); const clean = { t:r.t, ip:r.ip, uv:r.uv, seg:r.seg || '', g:normalizeGeo(r.g), p:r.p, s:r.s, k:r.k }; if (r.k === 'click') { clean.ck=r.ck; clean.ct=r.ct; } (byFile[d] = byFile[d] || []).push(JSON.stringify(clean)); }
+        // 权威库（SQLite）写入成功后才清空队列：失败向上抛出并保留队列，下次 flush 重试，绝不静默丢事件。
         if (this.stateDb) this.stateDb.appendEvents(pending);
-        for (const d of Object.keys(byFile)) await fs.promises.appendFile(this._visitsFile(d), byFile[d].join('\n') + '\n', 'utf8');
+        this.queue = [];
+        for (const d of Object.keys(byFile)) {
+          try { await fs.promises.appendFile(this._visitsFile(d), byFile[d].join('\n') + '\n', 'utf8'); }
+          catch (error) { console.error('[stats] 访问流水 jsonl 追加失败（权威库已写入）: ' + (error && error.message || error)); }
+        }
       }
       // 合并其他 Web 实例刚写入的当天流水，再持久化共享日聚合，保证最终一致。
       if (this.stateDb) this._syncDaysFromDb(this.todayKey);
-      const json = JSON.stringify({ version: 5, retention: 'forever', uniqueWindow: 'daily', ipStorage: 'network-segment', updatedAt: new Date().toISOString(), days: this.days });
-      if (this.stateDb) this.stateDb.setJSON('stats', 'daily', JSON.parse(json));
-      if (json !== this._lastDailyJson) { const tmp = path.join(this.dir, 'daily.json.tmp'); await fs.promises.writeFile(tmp, json, 'utf8'); await fs.promises.rename(tmp, path.join(this.dir, 'daily.json')); this._lastDailyJson = json; }
+      const payload = { version: 5, retention: 'forever', uniqueWindow: 'daily', ipStorage: 'network-segment', days: this.days };
+      const json = JSON.stringify(payload);
+      if (json !== this._lastDailyJson) {
+        // 聚合无变化时跳过整包重写：历史按「永久保留」增长，逐秒重写整份聚合会产生严重写放大。
+        this._lastDailyJson = json;
+        const stamped = JSON.stringify(Object.assign({ updatedAt: new Date().toISOString() }, payload));
+        if (this.stateDb) this.stateDb.setJSON('stats', 'daily', JSON.parse(stamped));
+        const tmp = path.join(this.dir, 'daily.json.tmp');
+        await fs.promises.writeFile(tmp, stamped, 'utf8');
+        await fs.promises.rename(tmp, path.join(this.dir, 'daily.json'));
+      }
     } finally { this.flushing = false; }
   }
   async shutdown() { if (this._timer) clearInterval(this._timer); await this.flush(); }
@@ -338,7 +365,7 @@ class Stats {
     };
     if (this.stateDb) {
       const oldest = dayKeyOf(new Date(Date.now() - Math.max(0, days - 1) * 86400000));
-      for (const record of this.stateDb.eventsSince(oldest)) apply(record);
+      for (const record of this.stateDb.iterateEventsSince(oldest)) apply(record);
     } else for (let i = 0; i < days; i++) { const d = new Date(Date.now() - i * 86400000); let textValue; try { textValue = await fs.promises.readFile(this._visitsFile(dayKeyOf(d)), 'utf8'); } catch (e) { continue; } for (const line of textValue.split('\n')) { if (!line.trim()) continue; try { apply(JSON.parse(line)); } catch (e) {} } }
     for (const record of this.queue) apply(record);
     const compact = (row, countKey) => ({ path:row.path, scope:row.scope, [countKey]:row[countKey], uv:row.uvs.size, ips:row.ips.size });

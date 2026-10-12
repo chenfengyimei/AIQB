@@ -182,12 +182,39 @@ class EmailManager {
   }
 
   _key() {
-    try {
-      const key = Buffer.from(fs.readFileSync(this.keyFile, 'utf8').trim(), 'base64');
-      if (key.length === 32) return key;
-    } catch (error) {}
+    let existing = null;
+    try { existing = fs.readFileSync(this.keyFile, 'utf8'); } catch (error) {}
+    if (existing != null) {
+      try {
+        const key = Buffer.from(existing.trim(), 'base64');
+        if (key.length === 32) return key;
+      } catch (error) {}
+      // 密钥文件损坏：保留现场并显式告警，绝不静默覆盖——否则已保存的
+      // SMTP 密码会永久无法解密且无人察觉。
+      const backup = this.keyFile + '.corrupt-' + Date.now();
+      try { fs.renameSync(this.keyFile, backup); } catch (error) {}
+      console.error('[email] 邮箱加密密钥文件损坏，已备份为 ' + backup + '；' +
+        '此前保存的 SMTP 密码将无法解密，请在管理后台重新填写');
+    }
     const key = crypto.randomBytes(32);
-    fs.writeFileSync(this.keyFile, key.toString('base64') + '\n', { mode: 0o600 });
+    try {
+      // 多实例共享 dataDir：wx 原子创建保证只有一个进程写入首个密钥，
+      // 避免各自生成不同密钥后互相解密失败。
+      const fd = fs.openSync(this.keyFile, 'wx', 0o600);
+      try { fs.writeFileSync(fd, key.toString('base64') + '\n'); } finally { fs.closeSync(fd); }
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      // 另一实例刚创建但可能尚未写完，短暂重试读回对方的密钥。
+      const sleeper = new Int32Array(new SharedArrayBuffer(4));
+      for (let attempt = 0; attempt < 40; attempt++) {
+        try {
+          const raced = Buffer.from(fs.readFileSync(this.keyFile, 'utf8').trim(), 'base64');
+          if (raced.length === 32) return raced;
+        } catch (readError) {}
+        Atomics.wait(sleeper, 0, 0, 25);
+      }
+      throw new Error('邮箱加密密钥初始化失败：无法读取另一实例写入的密钥文件');
+    }
     try { fs.chmodSync(this.keyFile, 0o600); } catch (error) {}
     return key;
   }

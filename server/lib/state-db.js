@@ -124,6 +124,13 @@ class StateDatabase {
     }).filter(Boolean);
   }
 
+  // 流式逐条产出事件：stats 热路径避免大范围查询一次性物化整个数组。
+  *iterateEventsSince(day) {
+    for (const row of this.db.prepare('SELECT payload FROM access_events WHERE day >= ? ORDER BY id').iterate(day)) {
+      try { const record = JSON.parse(row.payload); if (record) yield record; } catch (_) {}
+    }
+  }
+
   recentEvents(limit) {
     return this.db.prepare('SELECT payload FROM access_events ORDER BY id DESC LIMIT ?').all(Math.max(1, Number(limit) || 40)).map((row) => {
       try { return JSON.parse(row.payload); } catch (_) { return null; }
