@@ -108,8 +108,9 @@ async function main() {
       assert.deepStrictEqual(overview.sources.map((s) => s.id).sort(), ['gitee', 'github']);
       assert.ok(!JSON.stringify(overview).includes('token'));
     });
-    check('Windows 环境禁止直接覆盖代码', () => {
-      if (process.platform === 'win32') assert.strictEqual(overview.supported, false);
+    check('在线安装支持性与运行平台一致', () => {
+      // 非断言不可留空：Windows 必须不支持在线覆盖安装；Linux 在脚本存在时应支持
+      assert.strictEqual(overview.supported, process.platform === 'linux' && fs.existsSync(path.join(__dirname, '..', 'scripts', 'online_update.js')));
     });
     const requested = [];
     const mock = http.createServer((req, res) => {

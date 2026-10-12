@@ -102,8 +102,8 @@ npm start
 
 安装向导会询问站点地址、名称、数据目录和接口预设。完成后访问：
 
-- 前台：`http://127.0.0.1:3001/`
-- 后台：`http://127.0.0.1:3001/chenfengadmin`
+- 前台：`http://127.0.0.1:3000/`
+- 后台：`http://127.0.0.1:3000/chenfengadmin`
 - 首次账号：运行 `npm run admin:bootstrap`，在本机终端一次性设置密码（不回显、不落明文）
 
 ### Linux 服务器一键安装
@@ -170,7 +170,7 @@ AIQB/
 用户浏览器 ──HTTPS──▶ 可选 CDN ──HTTPS──▶ 源站 Nginx
                                                          │
                                                          反向代理
-                                                      → 127.0.0.1:3001
+                                                      → 127.0.0.1:3000
                                                                │
                                                                ▼
                                                        PM2 Web 双实例
@@ -294,6 +294,8 @@ data/
 ├── stats/
 │   ├── daily.json         日聚合（pv/uv/ips/api/hits）
 │   └── visits-*.jsonl     当日访问流水（IP 已哈希）
+├── backups/
+│   └── daily-*            内置定时备份（数据库一致性副本 + 关键 JSON，保留最新若干份）
 ├── auth/
 │   ├── users.json         管理账号（scrypt 哈希，不存明文）
 │   ├── sessions.json      会话回滚副本（仅存 token 哈希）
@@ -302,6 +304,15 @@ data/
     └── collect-*.log      采集日志（按天滚动，含登录审计）
 ```
 
+### 数据备份
+
+服务内置每日定时备份（在线更新与重新部署时的全量备份仍然保留，二者互不影响）：
+
+- 每天本地时间 **04:30** 自动执行（可用 `AIQB_BACKUP_AT=HH:MM` 调整）；停机跨过触发点时，启动后 1 分钟内自动补跑一次。
+- 备份内容写入 `server/data/backups/daily-<时间戳>/`：SQLite 数据库**一致性副本**（使用 SQLite 在线 backup API，运行中执行不阻塞服务）+ `config.json`、`stats/daily.json` 等关键 JSON。设置 `AIQB_BACKUP_FULL=1` 可额外复制完整数据目录（排除日志、更新缓存与一次性初始密码）。
+- 默认保留最新 **14** 份，超出自动删除最旧（`AIQB_BACKUP_KEEP` 可调，1–365）。多实例部署由跨实例锁保证每天只执行一次。
+- 备份状态可通过 `GET /api/admin/overview` 的 `backup` 字段查看；也可手动执行：`node scripts/backup_data.js --data-dir server/data --output-dir <目录>`。
+
 ## 本地启动与测试
 
 ```bash
@@ -309,7 +320,7 @@ cd server
 cd ..
 npm run setup
 npm run admin:bootstrap    # 密码在本机终端安全输入，不回显、不落明文
-npm start                  # 默认仅监听 http://127.0.0.1:3001
+npm start                  # 默认仅监听 http://127.0.0.1:3000
 
 # 全部测试（临时数据目录，不污染真实数据）
 npm test
@@ -324,7 +335,7 @@ node scripts/intelligence_store_test.js
 node scripts/check_frontend.js
 ```
 
-打开 http://localhost:3001/ 即完整看板；http://localhost:3001/chenfengadmin 为管理后台。
+打开 http://localhost:3000/ 即完整看板；http://localhost:3000/chenfengadmin 为管理后台。
 
 环境变量：`AIQB_PORT` / `AIQB_HOST` / `AIQB_DATA_DIR`（默认 `server/data`）。生产默认只监听 `127.0.0.1`；仅在容器网络等明确隔离场景中显式改为 `0.0.0.0`。`AIQB_TRUSTED_PROXIES` 只应填写直接连接 Node 的本机反向代理，CDN 真实 IP 必须先由 Nginx 按厂商官方 CIDR 校验并覆盖为 `X-Real-IP`。使用自定义数据目录时必须把它放在应用目录之外，在线更新会拒绝任何与应用目录重叠的自定义路径，以防源码替换覆盖运行数据。
 

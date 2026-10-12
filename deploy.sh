@@ -87,7 +87,8 @@ else
 fi
 
 # ---------- 2. Node.js 20 ----------
-if ! command -v node >/dev/null 2>&1 || [[ "$(node -v 2>/dev/null | sed 's/v//;s/\..*//')" -lt 18 ]]; then
+# engines 要求 >=20 <26：低于 20 一律升级，避免 Node 18 被放行后 setup 失败
+if ! command -v node >/dev/null 2>&1 || [[ "$(node -v 2>/dev/null | sed 's/v//;s/\..*//')" -lt 20 ]]; then
   echo "==> [2/6] 安装 Node.js 20（NodeSource）..."
   if [[ "$PKG_MGR" == "apt" ]]; then
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null
