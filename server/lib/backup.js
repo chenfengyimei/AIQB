@@ -105,9 +105,11 @@ class BackupScheduler {
   atLabel() { return pad(this.atSpec[0]) + ':' + pad(this.atSpec[1]); }
 
   nextRunAt(nowMs) {
-    const t = new Date(Number.isFinite(nowMs) ? nowMs : Date.now());
+    // 单一时钟源：以传入的 Date.now()（缺省再取一次）为锚构造 Date
+    const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+    const t = new Date(now);
     t.setHours(this.atSpec[0], this.atSpec[1], 0, 0);
-    if (t.getTime() <= (Number.isFinite(nowMs) ? nowMs : Date.now())) t.setDate(t.getDate() + 1);
+    if (t.getTime() <= now) t.setDate(t.getDate() + 1);
     return t.getTime();
   }
 
@@ -115,11 +117,13 @@ class BackupScheduler {
     if (this._timer) return;
     this._schedule();
     // 补跑：今日触发点已过但今天还没备份过（停机跨过触发点），延迟一分钟补一次。
+    // 全部比较都以 Date.now() 为锚：与 new Date() 混用会在时钟回拨/外部包装下互相矛盾。
     const state = this.status();
     const lastAt = Date.parse(state && state.lastAt || '') || 0;
-    const todayTrigger = new Date();
+    const now = Date.now();
+    const todayTrigger = new Date(now);
     todayTrigger.setHours(this.atSpec[0], this.atSpec[1], 0, 0);
-    if (Date.now() >= todayTrigger.getTime() && (!lastAt || new Date(lastAt).toDateString() !== new Date().toDateString())) {
+    if (now >= todayTrigger.getTime() && (!lastAt || new Date(lastAt).toDateString() !== new Date(now).toDateString())) {
       const catchUp = setTimeout(() => { this.runNow('catch-up').catch(() => {}); }, 60 * 1000);
       catchUp.unref();
       this._setState({ pendingCatchUp: true });
