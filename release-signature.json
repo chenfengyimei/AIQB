@@ -77,8 +77,8 @@
     },
     {
       "path": "frontend/admin.cae871c34d6c.js",
-      "size": 159599,
-      "sha256": "cae871c34d6c6ef3877cc2ca4141a19bab34324732739f00b6f45fbbf20a3a7a"
+      "size": 158019,
+      "sha256": "163bf03cf070ff383f2eca104b816887c090b90f6bf1d551044e5d59a9aa457d"
     },
     {
       "path": "frontend/admin.d10c6c26bf96.css",
@@ -87,8 +87,8 @@
     },
     {
       "path": "frontend/admin.html",
-      "size": 4663,
-      "sha256": "d7074957dc4dc8bdf76526176a2c87ce94cd0ac1bcae3a0b027e196fb9c631a2"
+      "size": 4662,
+      "sha256": "752ce39c47e02f79594e25c41fa7f8bf0a1d847ab816939c4553698588ebd5de"
     },
     {
       "path": "frontend/apple-touch-icon.png",
@@ -137,8 +137,8 @@
     },
     {
       "path": "frontend/index.html",
-      "size": 7468,
-      "sha256": "5c7da9804839d58490e24524c781d2ef475c49dbdbb3a6853527e21afcf3b254"
+      "size": 7467,
+      "sha256": "dc89df036741b567df157b3234517203067f8ac4403e997414d357fccb0c14d4"
     },
     {
       "path": "frontend/rss-style.css",
@@ -436,5 +436,5 @@
       "sha256": "48ac5d81120f2c14a94dea7525fbd94598a46f3a3abb2e36223bbb196352eede"
     }
   ],
-  "signature": "UT/wb681Vem1AfhzrKo9czM7QnaFKbgWdlbYjbrwXSfKhSybEOp1PCEWLmIVUoqkwx4Isbu3V9i4nN16I5wNCw=="
+  "signature": "GP2g3MN0XRhQRrSB32NdG/oTweOXVJUcynCGHkWkXxNXMa8hlclAk5X3sNuZh/8Ges+mRXQqaum1fokyihzSCw=="
 }
