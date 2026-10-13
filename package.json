@@ -1,6 +1,6 @@
 {
   "name": "aiqb",
-  "version": "2.27.0",
+  "version": "2.28.0",
   "private": true,
   "description": "可自托管的 AI 情报采集、去重、归档、展示与运营管理系统",
   "license": "CPAL-1.0",

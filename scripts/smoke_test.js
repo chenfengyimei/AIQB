@@ -10,6 +10,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { DEFAULTS } = require('../server/lib/config');
+const PACKAGE = require('../package.json');
 
 const ROOT = path.join(__dirname, '..');
 const SERVER = path.join(ROOT, 'server', 'server.js');
@@ -306,7 +307,7 @@ async function main() {
     check('健康接口包含滚动响应指标与整体状态', ['healthy','warning','critical'].includes(adminHealth.json.overall) && adminHealth.json.response.recent && typeof adminHealth.json.response.recent.p95Ms === 'number' && adminHealth.json.response.recent.count > 0 && adminHealth.json.process.eventLoopLagMs >= 0);
     check('健康接口可识别采集器心跳与独立实例', adminHealth.json.checks.some((item) => item.key === 'collector') && adminHealth.json.data.collect.heartbeatAt && adminHealth.json.data.collect.heartbeatAgeSec >= 0);
     const about = await req('GET', '/api/admin/about', { headers: { 'Cookie': cookie3 } });
-    check('关于系统返回版本、作者、运行环境、双仓库、哔哩哔哩与协议', about.status === 200 && about.json.system.version === '2.27.0' && about.json.system.author === 'chenfeng' && about.json.system.githubUrl === 'https://github.com/chenfengyimei/AIQB' && about.json.system.giteeUrl === 'https://gitee.com/chenfengloveyuri/aiqb' && about.json.system.bilibiliUrl === 'https://space.bilibili.com/508302628' && about.json.system.license && about.json.system.license.id === 'CPAL-1.0' && about.json.sources.length === 2);
+    check('关于系统返回版本、作者、运行环境、双仓库、哔哩哔哩与协议', about.status === 200 && about.json.system.version === PACKAGE.version && about.json.system.author === 'chenfeng' && about.json.system.githubUrl === 'https://github.com/chenfengyimei/AIQB' && about.json.system.giteeUrl === 'https://gitee.com/chenfengloveyuri/aiqb' && about.json.system.bilibiliUrl === 'https://space.bilibili.com/508302628' && about.json.system.license && about.json.system.license.id === 'CPAL-1.0' && about.json.sources.length === 2);
     const updateInfo = await req('GET', '/api/admin/update', { headers: { 'Cookie': cookie3 } });
     check('在线更新返回 GitHub/Gitee 双源、状态与安全措施', updateInfo.status === 200 && updateInfo.json.sources.some((s) => s.id === 'github') && updateInfo.json.sources.some((s) => s.id === 'gitee') && Array.isArray(updateInfo.json.safeguards) && !JSON.stringify(updateInfo.json).includes('AIQB_UPDATE_GITHUB_TOKEN'));
     const crossUpdate = await req('POST', '/api/admin/update/apply', { headers: Object.assign({}, H3, { Origin: 'https://evil.example.com' }), body: JSON.stringify({ source: 'github', expectedVersion: '9.9.9' }) });
