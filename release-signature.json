@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "product": "aiqb",
-  "version": "2.28.1",
+  "version": "2.28.2",
   "algorithm": "Ed25519",
   "keyId": "0557393f455eb331",
   "files": [
@@ -178,12 +178,12 @@
     {
       "path": "package-lock.json",
       "size": 16760,
-      "sha256": "911f2ee4f4d6e1bc761c95909046e5fe0e1be8f39049e6e1b6d64b92e99b9dcb"
+      "sha256": "5c20184aba2ea1525834bf5bb66fe017cc14b2088cc6693f90edeb69f31d9d80"
     },
     {
       "path": "package.json",
       "size": 1723,
-      "sha256": "732c3bf0c9c826416301e8d9751ecad60d91a1e2436795e2e53b1b1338a33ca6"
+      "sha256": "859468bc874c8d992750d4d2a28d6877098a01365de72522d9eb535a29402709"
     },
     {
       "path": "README.md",
@@ -332,8 +332,8 @@
     },
     {
       "path": "scripts/update_manager_test.js",
-      "size": 11531,
-      "sha256": "199ada4ec5ae3da823501a4440a05aaf112915e7bd5fe7464247996912d0380a"
+      "size": 11703,
+      "sha256": "9e553a9f4330b5080d7e32b05cb8fe189bc0fe79fb30de5d554f98c107df99a2"
     },
     {
       "path": "scripts/verify_release.js",
@@ -427,8 +427,8 @@
     },
     {
       "path": "server/lib/update-manager.js",
-      "size": 18577,
-      "sha256": "01d4d39ea93bff1219875efed8d24052db6784663791c5f5de5f7d543394fdcd"
+      "size": 18907,
+      "sha256": "03648827b6a6fbfd30c72e10624bd87b6fc45f5e6585626d665c2fbecf86a02c"
     },
     {
       "path": "server/server.js",
@@ -436,5 +436,5 @@
       "sha256": "48ac5d81120f2c14a94dea7525fbd94598a46f3a3abb2e36223bbb196352eede"
     }
   ],
-  "signature": "Qhxy2eM0Mx5jhY7T3HlDNXnBx9J9mwzR8rA+8Ng8rjFJ2Yz3jjcV6T8vutH2LijonKxciz4CEXePFZCSsNYjDA=="
+  "signature": "jg2mQdY/HmrIDqngPE5nmftrnx9SSqGAN0j9xpFFSdKXjTYN00JO+F9Pjj9/DWsRrJqm2P6SDqZG2wSnfp40Ag=="
 }

@@ -57,7 +57,9 @@ function sourcesFromEnv(env) {
       repositoryUrl: 'https://gitee.com/' + giteeRepo,
       commitUrl: appendQuery(giteeApi + '/commits/' + encodeURIComponent(branch), 'access_token', giteeToken),
       manifestUrl: appendQuery(giteeApi + '/contents/package.json?ref=' + encodeURIComponent(branch), 'access_token', giteeToken),
-      archiveUrl: appendQuery(giteeApi + '/tarball?ref=' + encodeURIComponent(branch), 'access_token', giteeToken),
+      // 归档下载必须走 Web 归档地址：Gitee 的 API tarball/zipball 端点对匿名请求一律 401
+      //（即使公开仓库），而 /repository/archive/ 公开仓库可匿名下载（302 到签名直链）。
+      archiveUrl: 'https://gitee.com/' + giteeRepo + '/repository/archive/' + encodeURIComponent(branch) + '.tar.gz',
       token: giteeToken,
     },
   };
@@ -74,7 +76,8 @@ function sourceForRevision(source, value) {
   } else if (source.id === 'gitee') {
     pinned.manifestUrl = appendQuery(source.apiBase + '/contents/package.json?ref=' + encodeURIComponent(revision), 'access_token', source.token);
     pinned.signatureUrl = appendQuery(source.apiBase + '/contents/release-signature.json?ref=' + encodeURIComponent(revision), 'access_token', source.token);
-    pinned.archiveUrl = appendQuery(source.apiBase + '/tarball?ref=' + encodeURIComponent(revision), 'access_token', source.token);
+    // API tarball 端点匿名 401（公开仓库亦然），改用可匿名下载的 Web 归档地址
+    pinned.archiveUrl = 'https://gitee.com/' + source.repo + '/repository/archive/' + encodeURIComponent(revision) + '.tar.gz';
   } else {
     throw Object.assign(new Error('未知更新源'), { statusCode: 400 });
   }

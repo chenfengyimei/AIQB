@@ -38,7 +38,9 @@ async function main() {
     const gitee = sourceForRevision(sources.gitee, revision);
     assert.ok(github.manifestUrl.endsWith('ref=' + revision));
     assert.ok(github.archiveUrl.endsWith('/' + revision));
-    assert.ok(gitee.archiveUrl.includes('ref=' + revision));
+    assert.ok(gitee.archiveUrl.includes('/repository/archive/' + revision + '.tar.gz'));
+    // Gitee 归档必须用 Web 地址：API tarball 匿名 401（公开仓库亦然）
+    assert.ok(!gitee.archiveUrl.includes('/api/v5/'));
     assert.ok(gitee.signatureUrl.includes('release-signature.json'));
     assert.strictEqual(normalizeRevision('../master'), '');
   });
