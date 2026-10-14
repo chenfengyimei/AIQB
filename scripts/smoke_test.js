@@ -30,6 +30,46 @@ function check(name, cond, detail) {
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
+// 同步读取 visits 流水（全部记录，含 page/click）；任何缺失/损坏都返回空数组而非抛错
+function readVisitRecordsSync() {
+  const statsDir = path.join(DATA_DIR, 'stats');
+  let files = [];
+  try { files = fs.readdirSync(statsDir).filter((f) => /^visits-.*\.jsonl$/.test(f)); } catch (e) {}
+  const records = [];
+  for (const f of files) {
+    let lines = [];
+    try { lines = fs.readFileSync(path.join(statsDir, f), 'utf8').split('\n'); } catch (e) { continue; }
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try { records.push(JSON.parse(line)); } catch (e) {}
+    }
+  }
+  return records;
+}
+
+// 同步读取 stats 下 JSON 文件；缺失/损坏返回 null 而非抛错
+function readStatsJsonSync(fileName) {
+  try {
+    const raw = fs.readFileSync(path.join(DATA_DIR, 'stats', fileName), 'utf8');
+    if (!raw.trim()) return null;
+    try { return JSON.parse(raw); } catch (e) { return null; }
+  } catch (e) { return null; }
+}
+
+// 通用谓词轮询：统计按 10s 周期异步落盘，CI 慢机器/高负载下固定 sleep 会与刷新
+// 周期失配，且"文件已存在"不代表"本轮数据已写入"。这里轮询到预期数据真正出现，
+// 超时返回 null 由调用方干净断言失败——文件缺失绝不升级为未捕获异常（exit 2）。
+async function pollUntil(fn, timeoutMs) {
+  const deadline = Date.now() + (timeoutMs || 30000);
+  while (Date.now() < deadline) {
+    let result = null;
+    try { result = await fn(); } catch (e) { result = null; }
+    if (result) return result;
+    await sleep(500);
+  }
+  return null;
+}
+
 async function req(method, url, opts) {
   const o = Object.assign({ method, headers: {} }, opts || {});
   const res = await fetch(BASE + url, o);
@@ -101,7 +141,15 @@ async function main() {
   try {
     // ---------- 就绪 ----------
     console.log('\n[1] 启动与健康检查');
-    check('服务在 15s 内就绪', await waitServer(15000), serverLog.slice(-400));
+    // CI 高负载时启动可能超过 15s：等待窗口放宽到 30s；就绪失败时快速中止并
+    // 输出服务器日志，而不是带死服务器跑出上百个无效失败后在文件读取处崩溃
+    const ready = await waitServer(30000);
+    check('服务在 30s 内就绪', !!ready, serverLog.slice(-600));
+    if (!ready) {
+      console.log('\n================ 服务器未能启动，中止冒烟测试 ================');
+      console.log(serverLog.slice(-2000));
+      process.exit(2);
+    }
 
     const health = await req('GET', '/health');
     check('/health 返回 200', health.status === 200);
@@ -549,46 +597,44 @@ async function main() {
     });
     check('非法 url scheme 被忽略（仍 204 不报错）', trackBad.status === 204);
     // 直接读落盘文件验证点击记录（避免登录限流窗口干扰会话接口）
-    await sleep(12000); // 等待落盘周期
-    const statsDir = path.join(DATA_DIR, 'stats');
-    const visitsFiles = fs.readdirSync(statsDir).filter((f) => /^visits-.*\.jsonl$/.test(f));
-    let clickRecords = [];
-    for (const f of visitsFiles) {
-      for (const line of fs.readFileSync(path.join(statsDir, f), 'utf8').split('\n')) {
-        if (!line.trim()) continue;
-        try {
-          const r = JSON.parse(line);
-          if (r.k === 'click') clickRecords.push(r);
-        } catch (e) {}
-      }
-    }
-    check('点击与分享记录已落盘（3 条）', clickRecords.length === 3, JSON.stringify(clickRecords));
+    // 落盘为 10s 周期异步写：轮询等待点击记录真正出现在文件里，而非只等文件存在
+    const clickRecords = (await pollUntil(() => {
+      const clicks = readVisitRecordsSync().filter((r) => r.k === 'click');
+      return clicks.length >= 3 ? clicks : null;
+    }, 30000)) || [];
+    check('点击与分享记录已落盘（3 条）', clickRecords.length === 3, '实际 ' + clickRecords.length + ' 条');
     const friendRec = clickRecords.find((r) => r.ck === 'friend');
     const itemRec = clickRecords.find((r) => r.ck === 'item');
     const shareRec = clickRecords.find((r) => r.ck === 'share');
     check('友链点击 kind=friend 且 url 正确', !!(friendRec && String(friendRec.p).indexOf('bilibili.com/508302628') !== -1));
     check('情报点击含 title', !!(itemRec && itemRec.ct === '测试推文'));
     check('文章分享独立记录且不混入情报点击', !!(shareRec && shareRec.ct === '测试文章'));
-    const savedStats = JSON.parse(fs.readFileSync(path.join(statsDir, 'daily.json'), 'utf8'));
-    const savedToday = savedStats.days && savedStats.days[Object.keys(savedStats.days).sort().slice(-1)[0]];
-    check('链接点击与文章分享以 v5 永久日维度口径聚合', savedStats.version === 5 && savedStats.uniqueWindow === 'daily' && savedToday.clicks === 2 && savedToday.itemClicks === 1 && savedToday.friendClicks === 1 && savedToday.articleShares === 1 && savedToday.scopes.click.requests === 3);
+    const savedToday = await pollUntil(() => {
+      const saved = readStatsJsonSync('daily.json');
+      if (!saved || !saved.days) return null;
+      const today = saved.days[Object.keys(saved.days).sort().slice(-1)[0]];
+      return (today && today.clicks === 2 && today.itemClicks === 1 && today.friendClicks === 1 && today.articleShares === 1 && today.scopes && today.scopes.click && today.scopes.click.requests === 3) ? { saved, today } : null;
+    }, 30000);
+    check('daily.json 已聚合到点击数据', !!savedToday, savedToday === null ? '30s 内 daily.json 未聚合出点击口径（统计落盘异常）' : '');
+    check('链接点击与文章分享以 v5 永久日维度口径聚合', !!savedToday && savedToday.saved.version === 5 && savedToday.saved.uniqueWindow === 'daily' && savedToday.saved.retention === 'forever');
 
     // ---------- 访问统计落盘 ----------
-    console.log('\n[10] 访问统计落盘（等待 11s 刷新周期）');
-    await sleep(11000);
-    const dailyFile = path.join(DATA_DIR, 'stats', 'daily.json');
-    check('daily.json 已生成', fs.existsSync(dailyFile));
-    if (fs.existsSync(dailyFile)) {
-      const daily = JSON.parse(fs.readFileSync(dailyFile, 'utf8'));
-      const todayKey = new Date();
+    console.log('\n[10] 访问统计落盘（等待落盘周期）');
+    const today = await pollUntil(() => {
+      const saved = readStatsJsonSync('daily.json');
+      if (!saved || !saved.days) return null;
+      const now = new Date();
       const p = (n) => String(n).padStart(2, '0');
-      const key = todayKey.getFullYear() + '-' + p(todayKey.getMonth() + 1) + '-' + p(todayKey.getDate());
-      const today = daily.days && daily.days[key];
-      check('当日统计已按区域和文章口径聚合且永久保留', !!(today && daily.version === 5 && daily.retention === 'forever' && daily.uniqueWindow === 'daily' && today.pv > 0 && today.articlePv >= 1 && today.articleShares === 1 && today.ips >= 1 && today.scopes && today.scopes.frontend && today.scopes.admin && today.scopes.click), JSON.stringify(today || null));
-    }
-    const visitsFile = path.join(DATA_DIR, 'stats', fs.readdirSync(path.join(DATA_DIR, 'stats')).find((f) => /^visits-.*\.jsonl$/.test(f)));
-    const visitLines = fs.readFileSync(visitsFile, 'utf8').split('\n').filter((l) => l.trim());
-    const visitRecords = visitLines.map((line) => { try { return JSON.parse(line); } catch (e) { return null; } }).filter(Boolean);
+      const key = now.getFullYear() + '-' + p(now.getMonth() + 1) + '-' + p(now.getDate());
+      const t = saved.days[key];
+      return (t && saved.version === 5 && saved.retention === 'forever' && saved.uniqueWindow === 'daily' && t.pv > 0 && t.articlePv >= 1 && t.articleShares === 1 && t.ips >= 1 && t.scopes && t.scopes.frontend && t.scopes.admin && t.scopes.click) ? t : null;
+    }, 30000);
+    check('daily.json 已生成', !!today, today === null ? '30s 内 daily.json 未聚合出当日数据（统计落盘异常）' : '');
+    check('当日统计已按区域和文章口径聚合且永久保留', !!today, today === null ? '当日聚合条件未满足' : '');
+    const visitRecords = (await pollUntil(() => {
+      const rs = readVisitRecordsSync();
+      return rs.some((line) => line.seg === '8.8.8.0/24' && line.g && line.g.regionCode === 'CN-GD') ? rs : null;
+    }, 30000)) || [];
     check('当日流水保存日级哈希、IP 网段与地域且不落完整 IP', visitRecords.length > 0 && visitRecords.some((line) => line.seg === '8.8.8.0/24' && line.g && line.g.regionCode === 'CN-GD') && !/\b(?:127\.0\.0\.1|8\.8\.8\.42)\b/.test(JSON.stringify(visitRecords)));
   } finally {
     child.kill();

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "product": "aiqb",
-  "version": "2.28.0",
+  "version": "2.28.1",
   "algorithm": "Ed25519",
   "keyId": "0557393f455eb331",
   "files": [
@@ -178,12 +178,12 @@
     {
       "path": "package-lock.json",
       "size": 16760,
-      "sha256": "b4361c1a30c91bfa2b2e5b4b0cb67057e5f2f3d7ef5c7717a09601196f99ac8d"
+      "sha256": "911f2ee4f4d6e1bc761c95909046e5fe0e1be8f39049e6e1b6d64b92e99b9dcb"
     },
     {
       "path": "package.json",
       "size": 1723,
-      "sha256": "e96dc39ba670f0644751c02a64e5e32509a21449e5eef9011fc44e1c76828744"
+      "sha256": "732c3bf0c9c826416301e8d9751ecad60d91a1e2436795e2e53b1b1338a33ca6"
     },
     {
       "path": "README.md",
@@ -312,8 +312,8 @@
     },
     {
       "path": "scripts/smoke_test.js",
-      "size": 59159,
-      "sha256": "b134718652fafc0674332e181f3cccdcec27c6e7de86ea9609c13e579abc8ead"
+      "size": 61206,
+      "sha256": "c73120556c1f3ec6b2aa2e1ab370914d5e4ab4a79ec88373d04e202163521254"
     },
     {
       "path": "scripts/state_db_test.js",
@@ -436,5 +436,5 @@
       "sha256": "48ac5d81120f2c14a94dea7525fbd94598a46f3a3abb2e36223bbb196352eede"
     }
   ],
-  "signature": "GP2g3MN0XRhQRrSB32NdG/oTweOXVJUcynCGHkWkXxNXMa8hlclAk5X3sNuZh/8Ges+mRXQqaum1fokyihzSCw=="
+  "signature": "Qhxy2eM0Mx5jhY7T3HlDNXnBx9J9mwzR8rA+8Ng8rjFJ2Yz3jjcV6T8vutH2LijonKxciz4CEXePFZCSsNYjDA=="
 }
