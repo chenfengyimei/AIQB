@@ -177,7 +177,11 @@ function requestHeaders(source) {
     headers.accept = 'application/vnd.github+json';
     headers['x-github-api-version'] = '2022-11-28';
     if (source.token) headers.authorization = 'Bearer ' + source.token;
+    return headers;
   }
+  // Gitee：不得携带自定义 User-Agent——其 Web 归档/CDN（blazearchive）对非浏览器 UA
+  // 返回 HTTP 200 的防爬 HTML 而非归档文件（API 端点则不受影响）。
+  delete headers['user-agent'];
   return headers;
 }
 

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "product": "aiqb",
-  "version": "2.28.2",
+  "version": "2.28.3",
   "algorithm": "Ed25519",
   "keyId": "0557393f455eb331",
   "files": [
@@ -178,12 +178,12 @@
     {
       "path": "package-lock.json",
       "size": 16760,
-      "sha256": "5c20184aba2ea1525834bf5bb66fe017cc14b2088cc6693f90edeb69f31d9d80"
+      "sha256": "405976fb9191a9c21ba6b83d538e8f703adc36989e3e4a624552fe35be0e610c"
     },
     {
       "path": "package.json",
       "size": 1723,
-      "sha256": "859468bc874c8d992750d4d2a28d6877098a01365de72522d9eb535a29402709"
+      "sha256": "81bac93798b5b6382bf286088aacae7b4b412a7a375c120999e3b0f1999decab"
     },
     {
       "path": "README.md",
@@ -427,8 +427,8 @@
     },
     {
       "path": "server/lib/update-manager.js",
-      "size": 18907,
-      "sha256": "03648827b6a6fbfd30c72e10624bd87b6fc45f5e6585626d665c2fbecf86a02c"
+      "size": 19154,
+      "sha256": "63ae64372462dee71e872b89b8eb184e5598301b4edba7125c32c4680f75ab6e"
     },
     {
       "path": "server/server.js",
@@ -436,5 +436,5 @@
       "sha256": "48ac5d81120f2c14a94dea7525fbd94598a46f3a3abb2e36223bbb196352eede"
     }
   ],
-  "signature": "jg2mQdY/HmrIDqngPE5nmftrnx9SSqGAN0j9xpFFSdKXjTYN00JO+F9Pjj9/DWsRrJqm2P6SDqZG2wSnfp40Ag=="
+  "signature": "lThi6Mk5Uj1EkNSZW48QmyqYZYv7APAnR365lRpdqOpvMuJfsmjfdlL594eke/2IxISk6bhhFwrF17yAOQF3Cg=="
 }
